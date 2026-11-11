@@ -82,6 +82,7 @@
       this.strength = 1; this.lag = 0; this.engaged = 0; this.engagedT = 0; this.cx = this.ax; this.cy = this.ay;
       this.halfW = 10; this.front = 0; this.back = 0; this.radius = 10;
       this.flankHits = 0; this.volleyT = 0; this.phaseT = 0; this.waypoint = null;
+      this.lx = 1; this.ly = 0; this.lanceT = 3; this.committed = false; this.shockT = -99;
       this.compactCount = -1; this.supportOf = null; this.supOff = null; this.events = {};
       this.braced = false;
     }
@@ -246,14 +247,20 @@
 
   function infantryScore(R, B, T) {
     const pref = R.def.prefer || {};
+    const horde = R.discipline === 0;
     return (E) => {
-      const d = dist(R.cx, R.cy, E.cx, E.cy) - E.radius;
-      const dx = E.cx - R.cx, dy = E.cy - R.cy, l = Math.hypot(dx, dy) || 1;
+      const dc = dist(R.cx, R.cy, E.cx, E.cy), d = dc - E.radius;
+      const dx = E.cx - R.cx, dy = E.cy - R.cy, l = dc || 1;
       const ahead = (dx * R.cos + dy * R.sin) / l;          // prefer what is in front of us
       let s = d + (1 - ahead) * 120;
+      // spread over the enemy line: leave an enemy to the friends that are closer to it. Only the
+      // farther regiment gives way, so the choice settles instead of everybody switching together.
       let crowd = 0;
-      for (const F of T.regs) if (F !== R && F.team === R.team && F.pTarget === E && F.active() && F.role !== 'missile' && F.role !== 'cavalry') crowd++;
-      s += crowd * 90;                                        // spread over the enemy line
+      for (const F of T.regs) {
+        if (F === R || F.team !== R.team || F.pTarget !== E || !F.active() || F.role === 'missile' || F.role === 'cavalry') continue;
+        if (dist(F.cx, F.cy, E.cx, E.cy) < dc) crowd++;
+      }
+      s += crowd * (horde ? 40 : 90);                         // a mob piles in all the same
       if (pref[E.type]) s -= pref[E.type] * 1.5;
       if (E.routing) s += 260;                                // infantry doesn't run after fugitives
       if (E.role === 'cavalry' && R.type !== 'spear') s += 120;
@@ -330,8 +337,9 @@
     // threat: enemy foot (or fast horse) about to reach us — skirmish back a few steps, then shoot again
     let threat = null, td = Infinity;
     for (const E of foes) {
-      if (E.role === 'missile' || E.routing) continue;
-      const d = gapTo(R, E) - (E.role === 'cavalry' ? 70 : 0);
+      // horses are twice as fast as a man on foot: running from them only wastes the volley
+      if (E.role === 'missile' || E.role === 'cavalry' || E.routing) continue;
+      const d = gapTo(R, E);
       if (d < td) { td = d; threat = E; }
     }
     const C = TM.CONFIG;
@@ -359,6 +367,7 @@
       if (E.role === 'missile') s -= 40;
       if (E.routing) s += 120;
       if (closing(E, R)) s -= 140;
+      if (E === R.target) s -= 60;                       // keep the volleys on one enemy
       if (s < bs) { bs = s; best = E; }
     }
     R.target = best;
@@ -385,19 +394,40 @@
   // A volley: every loaded archer looses within ~0.4 s at the target regiment. When it is fighting our
   // own men, aim at its rear ranks (the men farthest from us) to keep arrows out of the melee.
   function volley(R, B, E) {
+    // never into a melee: skip enemies with one of our men close to them (the arrows scatter ~15 px)
     const tgts = [];
-    for (const u of E.members) if (u.state === ALIVE) tgts.push(u);
-    if (!tgts.length) return;
+    for (const u of E.members) {
+      if (u.state !== ALIVE) continue;
+      const o = u.nearEnemy;
+      if (o && o.state === ALIVE && u.nearEnemyD - o.r - u.r < (o.r > 10 ? 55 : 30)) continue; // wider berth for a giant
+      tgts.push(u);
+    }
+    if (!tgts.length) { R.volleyT = 0.2; return; }
     const fx = R.frontX(), fy = R.frontY();
     if (E.engaged > 0.15) {
       tgts.sort((a, b) => dist(fx, fy, b.x, b.y) - dist(fx, fy, a.x, a.y) || a.id - b.id);
       tgts.length = Math.max(1, Math.ceil(tgts.length * 0.5));
     }
+    // each archer shoots at the part of the enemy formation in front of him: one of the few nearest
+    // men within his range. Arrows land on the front ranks (and kill there) instead of being
+    // sprinkled over the whole regiment, part of it out of reach.
+    const reach2 = (R.def.ranged.range + 30) * (R.def.ranged.range + 30);
+    const pick = [null, null, null, null], pd = [0, 0, 0, 0];
     let fired = 0;
     for (const u of R.members) {
       if (u.state !== ALIVE || u.fleeing || u.rangedCd > 0.5 || B.time - u.contactT < 0.6) continue;
+      let k = 0;
+      for (const v of tgts) {
+        const d = (v.x - u.x) * (v.x - u.x) + (v.y - u.y) * (v.y - u.y);
+        if (d > reach2) continue;
+        if (k < 4) { pick[k] = v; pd[k] = d; k++; continue; }
+        let w = 0;
+        for (let i = 1; i < 4; i++) if (pd[i] > pd[w]) w = i;
+        if (d < pd[w]) { pick[w] = v; pd[w] = d; }
+      }
+      if (!k) continue;
       u.volleyAt = B.time + U.rand() * 0.4;
-      u.volleyTarget = tgts[(U.rand() * tgts.length) | 0];
+      u.volleyTarget = pick[(U.rand() * k) | 0];
       fired++;
     }
     R.volleyT = fired ? R.def.ranged.cooldown : 0.2;
@@ -410,6 +440,7 @@
       if (E.engaged > 0.2) v *= 2.2;                        // hit them while they are busy
       if (E.routing) v *= 1.8;                              // ride down the fugitives
       if (E.type === 'spear' && E.engaged < 0.25) v *= 0.25; // never into an unengaged pike wall
+      if (E.role === 'cavalry' && closing(E, R)) v *= 2.5;   // meet a charge with a counter-charge
       v *= E.n / (E.n + 8);
       const d = dist(R.cx, R.cy, E.cx, E.cy);
       return -v / (1 + d / 450);
@@ -459,11 +490,15 @@
     if (R.order === 'reform' && R.phaseT < 1.4) return;
     if (R.order === 'lance' || R.order === 'melee') {
       const E = R.target;
-      const done = !E || !E.active() || (R.order === 'lance' && R.phaseT > 3) || (R.order === 'melee' && R.phaseT > 2.6);
+      const done = !E || !E.active() || (R.order === 'lance' && R.phaseT > R.lanceT) || (R.order === 'melee' && R.phaseT > 2.6);
       if (R.order === 'lance' && E && E.active()) {
-        // ride through the target, then fight it out briefly
-        const passed = (R.ax - E.cx) * R.cos + (R.ay - E.cy) * R.sin > 0;
+        // ride through the target (following it if it tries to slip away), then fight it out briefly
+        const passed = (R.ax - E.cx) * R.lx + (R.ay - E.cy) * R.ly > 0;
         if (passed || R.engaged > 0.4) { R.setOrder('melee'); R.phaseT = 0; R.stop(); }
+        else if (R.phaseT < R.lanceT) {
+          R.go(U.clamp(E.cx + R.lx * 70, 20, TM.CONFIG.WORLD_W - 20), U.clamp(E.cy + R.ly * 70, 20, TM.CONFIG.WORLD_H - 20), R.maxSpeed);
+          return;
+        }
       }
       if (!done) return;
       // break off: ride back towards our own side
@@ -483,7 +518,8 @@
     const ourFight = T.regs.some((r) => r.team === R.team && r.role !== 'cavalry' && r.role !== 'missile' && r.engaged > 0.2);
     const theirHorse = foes.some((r) => r.role === 'cavalry' && r.active() && gapTo(R, r) < 320);
     // wait on the flank until a charge makes sense: enemy horse nearby, an open target, or the lines have clinched
-    const worth = theirHorse || tgt.routing || ourFight || tgt.engaged > 0.2 || (!wall && tgt.role === 'missile') || B.time > 40;
+    const worth = R.committed || theirHorse || tgt.routing || ourFight || tgt.engaged > 0.2 || (!wall && tgt.role === 'missile') || B.time > 40;
+    R.committed = worth;   // once the horse is loose it keeps attacking: no riding back to the line mid-manoeuvre
     if (!worth) {
       R.setOrder('screen');
       const lx = G.cx + G.axX * (G.lineFront - 40), ly = G.cy + G.axY * (G.lineFront - 40);
@@ -528,6 +564,8 @@
       if (fromBehind && tgt.role !== 'missile') tacticalEvent(B, R, 'rear', `${TM.TEAMS[R.team].name}: ${R.name} бьют в тыл (${tgt.name})!`);
     }
     R.setOrder('lance'); R.phaseT = 0;
+    R.lx = dx / l; R.ly = dy / l;
+    R.lanceT = 2 + (l + 70) / R.maxSpeed;            // time to cross the distance and ride through
     R.go(U.clamp(ex + dx / l * 70, 20, TM.CONFIG.WORLD_W - 20), U.clamp(ey + dy / l * 70, 20, TM.CONFIG.WORLD_H - 20), R.maxSpeed);
     R.goalAngle = Math.atan2(dy, dx);
   }
@@ -535,9 +573,10 @@
   // ---------------------------------------------------------------- rout & rally
   function thinkMorale(R, B) {
     // every tenth of the regiment lost shakes the survivors
+    // (a mob takes heart from its mass: a chunk of a horde is shaken half as much)
     const lost = Math.floor((1 - R.strength) * 10);
     if (lost > (R.lostTenths || 0)) {
-      const hit = (lost - (R.lostTenths || 0)) * 5;
+      const hit = (lost - (R.lostTenths || 0)) * (R.discipline ? 5 : 2.5);
       R.lostTenths = lost;
       if (B.opts.morale) for (const u of R.members) if (u.state === ALIVE && !u.def.fearless) u.morale -= hit;
     }
@@ -546,11 +585,15 @@
         R.routing = true;
         R.setOrder('rout'); R.stop(); R.target = null;
         if (R.alive >= 6) tacticalEvent(B, R, 'rout', `${TM.TEAMS[R.team].name}: ${R.name} бегут!`);
-        // a regiment running past its neighbours shakes them
+        // a regiment running past its neighbours shakes them (a big one more than a handful;
+        // at most one such shock per regiment every few seconds, so a crowd doesn't chain-react)
         for (const F of B.tac.regs) {
-          if (F === R || F.team !== R.team || !F.active()) continue;
+          if (F === R || F.team !== R.team || !F.active() || B.time - F.shockT < 4) continue;
+          if (!R.discipline && !F.discipline) continue;   // inside a mob panic spreads man to man instead
           if (dist(F.cx, F.cy, R.cx, R.cy) - F.radius - R.radius > 120) continue;
-          for (const u of F.members) if (u.state === ALIVE && !u.def.fearless) u.morale -= 7;
+          F.shockT = B.time;
+          const hit = 7 * U.clamp(R.alive / Math.max(1, F.n), 0.3, 1);
+          if (B.opts.morale) for (const u of F.members) if (u.state === ALIVE && !u.def.fearless) u.morale -= hit;
         }
       }
       return false;

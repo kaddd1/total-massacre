@@ -126,6 +126,100 @@ console.log('\n# Regressions');
   check('sound hooks do not influence the simulation', silent === loud && events > 100, `events=${events}`);
 }
 
+// ---------------------------------------------------------------- tactics
+console.log('\n# Tactics (regiments, orders, morale)');
+// watch a battle: orders seen per type, rank keeping before the first blow, volleys, friendly fire, routs
+function watch(armies, seed, seconds) {
+  const B = battle(armies, seed);
+  const W = { B, orders: new Set(), lag: [], routed: new Set(), committed: 0, shots: new Map(), fired: 0, ff: 0, brace: 0, events: [] };
+  let contact = false;
+  const hit0 = B.hit.bind(B);
+  B.hit = (a, v, dmg, kind, ...r) => {
+    if (a && v.state === TM.Units.ALIVE) {
+      if (a.team !== v.team && (kind === 'melee' || kind === 'charge')) contact = true;
+      if (kind === 'arrow' && a.team === v.team) W.ff++;
+      if (kind === 'brace') W.brace++;
+    }
+    return hit0(a, v, dmg, kind, ...r);
+  };
+  const fire0 = B.fireArrow.bind(B);
+  B.fireArrow = (u, ...r) => { W.fired++; const l = W.shots.get(u.reg) || []; l.push(B.time); W.shots.set(u.reg, l); return fire0(u, ...r); };
+  const ev0 = B.event.bind(B);
+  B.event = (text, team) => { W.events.push(text); return ev0(text, team); };
+  const support = B.tac.regs.filter((R) => R.role === 'support');
+  runFor(B, seconds, (b) => {
+    if ((b.time * 60 | 0) % 12) return;
+    for (const R of b.tac.regs) {
+      W.orders.add(R.type + ':' + R.order);
+      if (R.routing) W.routed.add(R);
+      if (!contact && R.n) W.lag.push(R.lag);
+    }
+  });
+  W.committed = support.filter((R) => R.role === 'front').length;
+  W.support = support.length;
+  return W;
+}
+const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+{
+  const P = TM.PRESETS[0];
+  const B0 = battle([P.red, P.blue], 21);
+  check('every soldier belongs to one regiment of his own team and type',
+    B0.units.every((u) => u.reg && u.reg.team === u.team && u.reg.type === u.type && u.reg.members.includes(u)) &&
+    B0.tac.regs.reduce((s, R) => s + R.members.length, 0) === B0.units.length);
+  const W = watch([P.red, P.blue], 21, 300);
+  check('ranks are kept on the march (mean distance from the own place < 6 px)', mean(W.lag) < 6, `mean ${mean(W.lag).toFixed(1)} px`);
+  const cav = ['knight:screen', 'knight:flank', 'knight:lance', 'knight:withdraw', 'knight:reform'];
+  check('cavalry covers the flank, rides round, charges, withdraws and re-forms', cav.every((o) => W.orders.has(o)), cav.filter((o) => !W.orders.has(o)).join(', ') + ' missing');
+  // volleys: the shots of a regiment come in bursts (gaps > 0.6 s split the bursts)
+  const bursts = [];
+  for (const times of W.shots.values()) { let n = 1; for (let i = 1; i < times.length; i++) { if (times[i] - times[i - 1] > 0.6) { bursts.push(n); n = 0; } n++; } bursts.push(n); }
+  check('archers shoot in volleys (mean volley ≥ 8 arrows)', mean(bursts) >= 8, `mean volley ${mean(bursts).toFixed(1)}`);
+  check('archers do not shoot into the melee (friendly hits < 1% of arrows)', W.ff / W.fired < 0.01, `${W.ff}/${W.fired}`);
+  check('reserves join the fight', W.support > 0 && W.committed > 0 && W.events.some((e) => e.includes('резерв')), `${W.committed}/${W.support} committed`);
+  check('regiments break, the beaten army runs and the battle ends', W.routed.size > 0 && W.B.state === 'over' && W.B.winner < 2 && W.B.time < 200, `routed ${W.routed.size}, t=${W.B.time.toFixed(0)}`);
+}
+{
+  // an army much stronger at range holds its ground and lets the enemy walk into the arrows
+  const B = battle([auto({ spear: 60, archer: 200 }), auto({ sword: 200 })], 4);
+  const x0 = mean(B.tac.regs.filter((R) => R.team === 0 && R.type === 'spear').map((R) => R.cx));
+  runFor(B, 8);
+  const x1 = mean(B.tac.regs.filter((R) => R.team === 0 && R.type === 'spear').map((R) => R.cx));
+  check('the archer army stands on the defensive', B.tac.gen[0].stance === 'defend' && Math.abs(x1 - x0) < 25, `stance ${B.tac.gen[0].stance}, moved ${(x1 - x0).toFixed(0)} px`);
+}
+{
+  // the arms counter each other
+  let kn = 0, sp = 0, brace = 0, braceOrder = 0;
+  for (let s = 1; s <= 4; s++) {
+    if (runFor(battle([auto({ knight: 60 }), auto({ archer: 150 })], 40 + s), 300).winner === 0) kn++;
+    const W = watch([auto({ knight: 60 }), auto({ spear: 150 })], 40 + s, 300);
+    if (W.B.winner === 1) sp++;
+    brace += W.brace; if (W.orders.has('spear:brace')) braceOrder++;
+  }
+  check('knights ride down unprotected archers (4/4)', kn === 4, `${kn}/4`);
+  check('pikes beat knights (4/4), planting the spears against the charge', sp === 4 && braceOrder === 4 && brace > 0, `${sp}/4, brace order ${braceOrder}/4, brace hits ${brace}`);
+}
+{
+  // mirror battles: no side wins much more often (the decision order alternates between the armies)
+  const P = TM.PRESETS[0];
+  let red = 0;
+  for (let s = 1; s <= 12; s++) if (runFor(battle([P.red, P.blue], 500 + s), 300).winner === 0) red++;
+  check('mirror battles are fair (red wins 3–9 of 12)', red >= 3 && red <= 9, `red won ${red}/12`);
+}
+{
+  const a = fingerprint(runFor(battle([TM.PRESETS[1].red, TM.PRESETS[1].blue], 77), 90));
+  const b = fingerprint(runFor(battle([TM.PRESETS[1].red, TM.PRESETS[1].blue], 77), 90));
+  check('a long battle with all the tactics is deterministic', a === b, `${a} vs ${b}`);
+}
+{
+  // ~2000 soldiers: the tactical layer must stay cheap
+  const C = counts({ sword: 400, spear: 250, archer: 250, knight: 75, giant: 10 });
+  const B = battle([{ counts: C, formation: 'line' }, { counts: C, formation: 'line' }], 3);
+  const t0 = performance.now();
+  runFor(B, 20);
+  const ms = (performance.now() - t0) / (20 * 60);
+  check(`~2000 soldiers simulate in < 10 ms per step (${ms.toFixed(2)} ms)`, ms < 10 && B.units.length > 1900);
+}
+
 // ---------------------------------------------------------------- editor geometry
 console.log('\n# Editor groups');
 {

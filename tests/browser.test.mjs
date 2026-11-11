@@ -19,6 +19,11 @@ async function uiTests(b) {
   check('setup persisted', (await b.ev(`JSON.parse(localStorage.getItem('total-massacre-setup-v1')).armies[0].counts.giant`)) === 10);
   await b.ev(`document.getElementById('btn-start').click()`); await sleep(1500);
   check('battle running with auto camera', await b.ev(`TM.Game.mode === 'battle' && TM.Game.battle.time > 0.5 && TM.Game.cam.auto`));
+  check('the armies are organised into regiments', await b.ev(`(() => { const B = TM.Game.battle; return B.tac.regs.length >= 8 && B.units.every((u) => u.reg && u.reg.members.includes(u)); })()`));
+  await b.key('KeyT', 't'); await sleep(300);
+  check('T shows the tactical overlay (orders of the regiments)', await b.ev(`TM.Game.renderer.showTactics === true && TM.Game.battle.tac.regs.some((r) => r.order !== 'hold')`));
+  await b.key('KeyT', 't');
+  check('T hides it again', (await b.ev('TM.Game.renderer.showTactics')) === false);
   await b.key('Digit3', '3');
   check('key 3 → speed 4x', (await b.ev('TM.Game.speed')) === 4);
   await b.key('BracketLeft', '['); await b.key('BracketLeft', '[');
@@ -118,6 +123,8 @@ async function editorTests(b) {
     s.armies[1] = { formation: 'manual', counts: s.armies[1].counts, groups: [{ id: 'b1', type: 'spear', count: 50, cols: 10, shape: 'crowd', angle: -Math.PI / 2, x: 1200, y: 1200 }] };
     TM.UI.syncFromSetup(); G.setupChanged(); })()`); await sleep(400);
   await b.ev(`document.getElementById('btn-start').click()`); await sleep(300);
+  const regs = await b.ev(`TM.Game.battle.tac.regs.map((r) => ({ team: r.team, type: r.type, n: r.n0, horde: r.discipline === 0 }))`);
+  check('every editor group becomes one regiment (a crowd fights as a horde)', regs.length === 2 && regs.some((r) => r.team === 0 && r.type === 'sword' && r.n === 60 && !r.horde) && regs.some((r) => r.team === 1 && r.type === 'spear' && r.n === 50 && r.horde), regs);
   const y0 = await b.ev(`TM.Game.battle.alive[0].reduce((s, u) => s + u.y, 0) / TM.Game.battle.alive[0].length`);
   await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 8; i++) B.step(1 / 60); })()`);
   const y1 = await b.ev(`TM.Game.battle.alive[0].reduce((s, u) => s + u.y, 0) / TM.Game.battle.alive[0].length`);
