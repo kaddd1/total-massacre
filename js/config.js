@@ -107,7 +107,7 @@
     {
       name: 'Дождь стрел', desc: 'Стрелки против штурма',
       red: { counts: { sword: 0, spear: 60, archer: 260, knight: 0, giant: 0 }, formation: 'line' },
-      blue: { counts: { sword: 200, spear: 0, archer: 0, knight: 35, giant: 0 }, formation: 'wedge' },
+      blue: { counts: { sword: 200, spear: 0, archer: 0, knight: 45, giant: 0 }, formation: 'wedge' },
     },
     {
       name: 'Рыцари против пик', desc: 'Классическая контра: смогут ли рыцари пробить стену копий?',

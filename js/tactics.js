@@ -260,7 +260,10 @@
       s += crowd * (horde ? 40 : 90);                         // a mob piles in all the same
       if (pref[E.type]) s -= pref[E.type] * 1.5;
       if (E.routing) s += 260;                                // infantry doesn't run after fugitives
-      if (E.role === 'cavalry' && R.type !== 'spear') s += 120;
+      // foot can't catch horse: cavalry is a target only when it is stuck in a fight close by
+      // (pikes brace against a charge instead, see thinkFront). Chasing it pulls the wings of the
+      // battle line off to the edges of the field.
+      if (E.role === 'cavalry' && !(E.engaged > 0.25 && d < 120)) s += R.type === 'spear' ? 320 : 400;
       if (R.doctrine === 'spearhead') s += dist(E.cx, E.cy, T.gen[R.team].ecx, T.gen[R.team].ecy) * 0.8; // drive into the centre
       return s;
     };
