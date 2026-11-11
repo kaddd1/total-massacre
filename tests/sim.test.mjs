@@ -9,7 +9,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILES = ['config', 'utils', 'spatial', 'formations', 'units', 'battle', 'editor'];
+const FILES = ['config', 'utils', 'spatial', 'formations', 'units', 'tactics', 'battle', 'editor'];
 
 function loadTM() {
   const sandbox = { console, Math, performance: { now: () => 0 }, document: { getElementById: () => null } };

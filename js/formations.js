@@ -18,6 +18,7 @@
     for (const key of order) {
       let n = counts[key] | 0;
       if (n <= 0) continue;
+      const blk = out.blk = (out.blk || 0) + 1; // every block of one type becomes one or more regiments
       const D = spacing(key);
       while (n > 0) {
         const w = widthFn(row);
@@ -27,7 +28,7 @@
         const stagger = (row % 2) * D * 0.35;
         for (let i = 0; i < k; i++) {
           out.push({
-            type: key,
+            type: key, blk,
             d: depth + U.range(-1.2, 1.2),
             l: lo - rowW / 2 + i * D + stagger + U.range(-1.2, 1.2),
           });
@@ -88,22 +89,38 @@
           let d = R * 0.75 + Math.cos(a) * rr * R * 0.75;
           if (key === 'archer') d += R * 0.35;
           if (key === 'giant' || key === 'knight') d *= 0.6;
-          out.push({ type: key, d, l: Math.sin(a) * rr * R * 1.35 });
+          out.push({ type: key, blk: 100 + TM.UNIT_ORDER.indexOf(key), d, l: Math.sin(a) * rr * R * 1.35 });
         }
       }
     },
   };
 
+  // how an army's regiments behave, by formation
+  const DOCTRINE = { line: 'line', block: 'line', wedge: 'spearhead', horde: 'horde' };
+
   TM.Formations = {
     spacing,
+    DOCTRINE,
     // Spawn spots for an army: manual groups (editor) or one of the automatic formations.
+    // Every spot carries its regiment: reg (index within the army), angle (regiment facing), doctrine.
     spawn(teamIdx, army) {
       if (army.formation === 'manual') {
         const out = [];
-        for (const g of army.groups || []) TM.Groups.layout(g, out);
+        (army.groups || []).forEach((g, gi) => {
+          const first = out.length;
+          TM.Groups.layout(g, out);
+          for (let i = first; i < out.length; i++) {
+            out[i].reg = gi; out[i].angle = g.angle || 0; out[i].doctrine = g.shape === 'crowd' ? 'horde' : 'line';
+          }
+        });
         return out;
       }
-      return this.generate(teamIdx, army.counts, army.formation);
+      const spots = this.generate(teamIdx, army.counts, army.formation);
+      const angle = TM.TEAMS[teamIdx].dir > 0 ? 0 : Math.PI;
+      const doctrine = DOCTRINE[army.formation] || 'line';
+      const reg = TM.Tactics.partition(spots, angle, doctrine === 'horde');
+      spots.forEach((s, i) => { s.reg = reg[i]; s.angle = angle; s.doctrine = doctrine; });
+      return spots;
     },
     generate(teamIdx, counts, formation) {
       const C = TM.CONFIG;
@@ -113,7 +130,7 @@
       const frontX = C.WORLD_W / 2 - dir * C.ARMY_GAP;
       const cy = C.WORLD_H / 2;
       return local.map((p) => ({
-        type: p.type,
+        type: p.type, blk: p.blk,
         x: U.clamp(frontX - dir * p.d, 24, C.WORLD_W - 24),
         y: U.clamp(cy + p.l * dir, 24, C.WORLD_H - 24),
       }));

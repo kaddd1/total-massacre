@@ -315,6 +315,7 @@
         else if (code === 'KeyC' && this.mode === 'battle') this.toggleAuto();
         else if (code === 'KeyH') TM.UI.toggleHelp();
         else if (code === 'KeyM') TM.Audio.toggleMute();
+        else if (code === 'KeyT') { R.showTactics = !R.showTactics; }
         else if (code === 'Equal' || code === 'NumpadAdd') { this.cam.auto = false; this.cam.stepZoom(1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
         else if (code === 'Minus' || code === 'NumpadSubtract') { this.cam.auto = false; this.cam.stepZoom(-1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
         else if (/^Digit[1-4]$/.test(code)) this.setSpeed([1, 2, 4, 8][+code.slice(5) - 1]);
@@ -352,6 +353,7 @@
         const u = this.battle.units.find((x) => x.type === type && x.state === 0 && (team == null || x.team === +team));
         if (u) { this.cam.x = u.x; this.cam.y = u.y; this.cam.auto = false; }
       }
+      if (q.get('tac') === '1') this.renderer.showTactics = true;
       if (q.get('auto') === '1') { this.cam.auto = true; TM.UI.syncControls(); }
       if (q.get('pause') === '1') { this.paused = true; TM.UI.syncControls(); }
       delete this.setup.seed;

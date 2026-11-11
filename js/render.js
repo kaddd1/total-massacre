@@ -161,11 +161,49 @@
       this.drawTexts(ctx, fx, D, ox, oy, n, K);
 
       if (TM.Game && TM.Game.mode === 'setup') TM.Editor.draw(ctx, D, ox, oy, n);
+      else if (this.showTactics && B.tac) this.drawTactics(ctx, B, D, ox, oy, n);
 
       // world border
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = Math.max(2, n);
       ctx.strokeRect(ox, oy, Wd * D, Hd * D);
+    }
+
+    // Tactical overlay (key T): every regiment's facing, where it is heading and its current order.
+    drawTactics(ctx, B, D, ox, oy, n) {
+      const k = D >= 0.999 ? Math.max(1, Math.round(n / 2)) : 1, lw = Math.max(1, k);
+      const ON = TM.Tactics.ORDER_NAME;
+      for (const R of B.tac.regs) {
+        if (R.alive === 0 || (R.n === 0 && !R.routing)) continue;
+        const T = TM.TEAMS[R.team];
+        const rx = R.routing ? R.fcx : R.cx, ry = R.routing ? R.fcy : R.cy;
+        const cx = Math.round(rx * D + ox), cy = Math.round(ry * D + oy);
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = T.light; ctx.globalAlpha = 0.75;
+        if (!R.routing && R.speed > 0) {
+          ctx.setLineDash([4 * lw, 3 * lw]);
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(Math.round(R.goalX * D + ox), Math.round(R.goalY * D + oy)); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        if (R.target && R.target.alive > 0 && !R.routing) {
+          ctx.strokeStyle = R.order === 'shoot' ? '#ffd34d' : R.role === 'cavalry' ? '#ff9a3c' : T.color;
+          ctx.globalAlpha = 0.45;
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(Math.round(R.target.cx * D + ox), Math.round(R.target.cy * D + oy)); ctx.stroke();
+        }
+        // facing arrow
+        if (R.routing) R.fcx = R.fcx; else {
+        ctx.globalAlpha = 0.9; ctx.strokeStyle = '#fff';
+        const len = Math.max(14, (R.front + 12) * D), ex = cx + R.cos * len, ey = cy + R.sin * len;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+        ctx.lineTo(ex - R.cos * 6 * lw - R.sin * 4 * lw, ey - R.sin * 6 * lw + R.cos * 4 * lw);
+        ctx.moveTo(ex, ey); ctx.lineTo(ex - R.cos * 6 * lw + R.sin * 4 * lw, ey - R.sin * 6 * lw - R.cos * 4 * lw);
+        ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        const label = R.routing ? `${R.name} ${R.fleeing}: бегут` : `${R.name} ${R.n}: ${ON[R.order] || R.order}`;
+        const cv = TM.Sprites.text(label, R.routing ? '#ffb347' : R.engaged > 0.15 ? '#ff8c80' : '#ffffff');
+        ctx.drawImage(cv, cx - ((cv.width * k) >> 1), cy - Math.round((R.radius + 14) * D) - cv.height * k, cv.width * k, cv.height * k);
+      }
     }
 
     drawRing(ctx, u, col, D, ox, oy, n) {

@@ -38,6 +38,7 @@
       this.endTime = 0;
       this.firstBlood = false;
       this.broken = [false, false];
+      this.routT = [0, 0];
       this.trampleAcc = 0;
       this.lastCritText = -1;
       this.hitTick = 0;
@@ -45,15 +46,21 @@
       this.freeMarch = setup.armies.some((a) => a.formation === 'manual');
 
       let id = 0;
+      const specs = [], specOf = new Map();
       for (let t = 0; t < 2; t++) {
         const army = setup.armies[t];
         const spots = TM.Formations.spawn(t, army);
         for (const s of spots) {
           const u = TM.Units.create(id++, t, s.type, s.x, s.y);
-          if (s.angle != null) u.facing = u.faceTo = s.angle; // hand-placed groups face where the editor pointed them
+          if (s.angle != null) u.facing = u.faceTo = s.angle; // regiments face where they were deployed
           this.units.push(u);
           this.stats[t].deployed++;
           this.stats[t].byType[s.type].deployed++;
+          // every spot belongs to a regiment (an editor group or a part of an automatic formation)
+          const key = t + ':' + s.reg + ':' + s.type;
+          let spec = specOf.get(key);
+          if (!spec) { spec = { team: t, type: s.type, angle: s.angle || 0, doctrine: s.doctrine || 'line', members: [] }; specOf.set(key, spec); specs.push(spec); }
+          spec.members.push(u);
         }
       }
       // shuffle so neither army systematically acts first within a tick
@@ -62,6 +69,7 @@
         const tmp = this.units[i]; this.units[i] = this.units[j]; this.units[j] = tmp;
       }
       this.rebuild();
+      TM.Tactics.build(this, specs);
     }
 
     start() {
@@ -145,6 +153,7 @@
       if (this.state === 'deploy') return;
       this.time += dt;
       this.rebuild();
+      TM.Tactics.update(this, dt);
 
       const units = this.units;
       // behaviour
@@ -349,6 +358,11 @@
         dmg *= v.def.arrowMul;
       }
       else if (kind === 'melee' && v.def.armor) dmg *= v.def.armor;
+      if (a && (kind === 'melee' || kind === 'charge')) {
+        // a formed regiment struck in the flank or the rear suffers more (and loses heart, see units.js)
+        dmg *= TM.Tactics.blowFrom(v, nx, ny);
+        a.contactT = v.contactT = this.time;
+      }
       if (v.fleeing) dmg *= 1.5;
       let crit = false;
       if (a && kind !== 'fall' && kind !== 'brace') {
@@ -522,7 +536,6 @@
       this.trampleAcc += dt;
       if (this.trampleAcc < 0.1) return;
       this.trampleAcc = 0;
-      this.lastCritText = -1;
       for (let t = 0; t < 2; t++) {
         const list = this.alive[t];
         const k = Math.min(list.length, 6);
@@ -536,9 +549,16 @@
     checkEnd() {
       if (this.state !== 'running') return;
       const a0 = this.stats[0].alive, a1 = this.stats[1].alive;
-      if (!this.endTime && (a0 === 0 || a1 === 0)) {
+      // an army with nobody left standing in the ranks for 5 s is routed: the field is lost
+      for (let t = 0; t < 2; t++) {
+        const s = this.stats[t], o = this.stats[1 - t];
+        this.routT[t] = s.alive > 0 && s.alive === s.fleeing && o.alive > o.fleeing ? this.routT[t] + 1 / 60 : 0;
+      }
+      const routed = this.routT[0] > 5 ? 0 : this.routT[1] > 5 ? 1 : -1;
+      if (!this.endTime && (a0 === 0 || a1 === 0 || routed >= 0)) {
         this.endTime = this.time;
-        this.winner = a0 > 0 ? 0 : a1 > 0 ? 1 : 2; // 2 = mutual annihilation
+        this.winner = routed >= 0 ? 1 - routed : a0 > 0 ? 0 : a1 > 0 ? 1 : 2; // 2 = mutual annihilation
+        if (routed >= 0) this.event(`${TM.TEAMS[routed].full} обращена в бегство`, routed);
         if (this.winner < 2) {
           this.event(`${TM.TEAMS[this.winner].full} побеждает!`, this.winner);
           if (this.center) this.snd('cheer', this.center[this.winner].x, this.center[this.winner].y);

@@ -1,4 +1,6 @@
-// Unit factory and per-unit autonomous behaviour (targeting, movement, morale).
+// Unit factory and per-soldier behaviour: morale, keeping one's place in the ranks, local fighting.
+// The regiment (js/tactics.js) decides where the formation goes; a soldier keeps to his slot and
+// only fights enemies that come within a short leash of his place in the ranks.
 (function (TM) {
   'use strict';
   const U = TM.U;
@@ -26,18 +28,23 @@
       hitFlash: 0, walk: U.rand() * 6.28, moveAmt: 0,
       speedMul: U.range(0.9, 1.1), flankBias: U.gauss() * 0.7,
       kills: 0, dmg: 0, attackers: 0,
-      mode: 0, wheelX: 0, wheelY: 0, wheelT: 0, engagedT: 0, chargeCd: 0, chargeImmune: 0,
+      mode: 0, engagedT: 0, chargeImmune: 0,
       stunT: 0, deathT: 0, deathRot: 0,
+      // regiment membership (set by TM.Tactics.build)
+      reg: null, slot: 0, sdep: 0, slat: 0, rank: 0, contactT: -9, volleyAt: 0, volleyTarget: null,
     };
   }
 
   // ---------------- perception / decision (runs ~3 times per second) ----------------
   function think(u, B) {
-    const d = u.def;
+    const d = u.def, R = u.reg;
     const el = Math.min(1, B.time - u.lastThink);
     u.lastThink = B.time;
 
-    const sense = d.sense;
+    // a soldier only looks for fights within reach of his place in the ranks
+    const leash = R ? TM.Tactics.leash(u) : 1e9;
+    const sx = R ? R.slotX(u) : u.x, sy = R ? R.slotY(u) : u.y;
+    const sense = R ? Math.max(MORALE_R, leash + d.reach + 40) : d.sense;
     const n = B.grid.query(u.x, u.y, sense, buf);
     let best = null, bestScore = 1e9;
     let allies = 0, enemies = 0, fleeingAllies = 0, terror = 0;
@@ -61,10 +68,16 @@
       }
       if (d2 < nearD2) { nearD2 = d2; near = o; }
       if (u.fleeing) continue;
+      if (R) {
+        if (d.ranged) continue; // archers shoot on the regiment's command; daggers use nearEnemy
+        const lim = leash + d.reach + u.r + o.r + 4;
+        const ox = o.x - sx, oy = o.y - sy;
+        if (ox * ox + oy * oy > lim * lim) continue;
+      }
 
       let s = Math.sqrt(d2);
       if (d.prefer && d.prefer[o.type]) s -= d.prefer[o.type];
-      if (d.ranged) s += o.attackers * 25 + U.rand() * 50;
+      if (!R && d.ranged) s += o.attackers * 25 + U.rand() * 50;
       else s += o.attackers * 9;
       if (o.fleeing) s += 30;
       if (o === u.target) s -= 25;
@@ -85,6 +98,15 @@
       dm -= Math.min(fleeingAllies, 6) * 1.2;
       dm -= terror;
       if (lossR > 0.55) dm -= (lossR - 0.55) * 22;
+      if (R) {
+        if (R.routing) dm -= 7;                                   // the regiment is running
+        else if (!u.fleeing) {
+          const ox = u.x - sx, oy = u.y - sy;
+          if (R.discipline && ox * ox + oy * oy < 576) dm += 1.5; // shoulder to shoulder in the ranks
+          dm -= R.flankHits * 0.9;                                // blows from the flank and the rear
+          if (R.strength < 0.5) dm -= (0.5 - R.strength) * 8;     // the regiment is melting away
+        }
+      }
       dm *= dm < 0 ? 1 / u.bravery : u.bravery;
       u.morale = U.clamp(u.morale + dm * el, 0, 100);
 
@@ -116,17 +138,23 @@
     }
 
     // ----- targeting -----
+    if (R && d.ranged) {
+      // a cornered archer draws his dagger; otherwise he aims where his regiment shoots
+      u.target = near && Math.sqrt(nearD2) - u.r - near.r < d.reach + 3 ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
+      if (u.target) B.contact[u.team] = true;
+      return;
+    }
     if (best) {
       u.target = best;
       B.contact[u.team] = true;
-    } else if (B.contact[u.team] || B.contact[1 - u.team] || B.time > 25) {
+    } else if (!R && (B.contact[u.team] || B.contact[1 - u.team] || B.time > 25)) {
       u.target = hunt(u, B);
     } else {
       u.target = null;
     }
   }
 
-  // No enemies around: pick the nearest from a random sample of the enemy army.
+  // No regiment and no enemies around: pick the nearest from a random sample of the enemy army.
   function hunt(u, B) {
     const list = B.alive[1 - u.team];
     const len = list.length;
@@ -146,7 +174,7 @@
   function update(u, B, dt) {
     const d = u.def;
     u.atkCd -= dt; u.rangedCd -= dt; u.hitFlash -= dt; u.shotT += dt;
-    u.chargeCd -= dt; u.chargeImmune -= dt; u.stunT -= dt;
+    u.chargeImmune -= dt; u.stunT -= dt;
 
     if (u.atkT >= 0) {
       u.atkT += dt;
@@ -172,37 +200,71 @@
       return;
     }
 
+    const R = u.reg;
     let t = u.target;
     if (t && t.state !== ALIVE) { t = u.target = null; u.thinkT = Math.min(u.thinkT, 0.05); }
 
-    if (!t) {
-      // march with the army, keeping formation
-      const m = B.march[u.team];
-      if (m.x === 0 && m.y === 0) {
-        // no enemies left: celebrate
-        if (B.winner === u.team && u.z <= 0 && u.type !== 'giant' && U.rand() < dt * 0.8) u.vz = 70 + U.rand() * 50;
-        return;
-      }
-      const ms = u.type === 'knight' ? speed * 0.5 : speed * 0.8;
-      u.desX = m.x * ms; u.desY = m.y * ms;
-      u.faceTo = Math.atan2(m.y, m.x);
-      u.engagedT = 0;
+    if (!R) return loose(u, B, t, speed, dt);
+    u.mode = R.order === 'withdraw' ? 1 : 0;
+    if (B.winner === u.team) {
+      // the field is ours: stand in the ranks and cheer
+      keepRank(u, R, R.slotX(u), R.slotY(u), speed);
+      if (u.z <= 0 && u.type !== 'giant' && U.rand() < dt * 0.8) u.vz = 70 + U.rand() * 50;
       return;
     }
+    if (d.ranged) return archer(u, B, R, t, speed);
 
-    if (u.type === 'knight' && u.mode === 1) return knightWheel(u, B, dt, speed);
+    const sx = R.slotX(u), sy = R.slotY(u);
+    if (t) {
+      // a fight that would drag us out of the ranks is dropped
+      const lim = TM.Tactics.leash(u) + d.reach + u.r + t.r + 18;
+      const ox = t.x - sx, oy = t.y - sy;
+      if (ox * ox + oy * oy > lim * lim) t = u.target = null;
+    }
+    if (R.role === 'cavalry' && R.order !== 'melee' && R.order !== 'hold') {
+      // riding in formation; strike whoever comes within reach on the way
+      ride(u, R, sx, sy, speed);
+      if (t) {
+        const gap = Math.hypot(t.x - u.x, t.y - u.y) - u.r - t.r;
+        if (gap <= d.reach) { u.contactT = B.time; if (u.atkCd <= 0 && u.atkT < 0) startAttack(u, t, gap); }
+      }
+      return;
+    }
+    if (t) return melee(u, B, t, speed, dt);
+    keepRank(u, R, sx, sy, speed);
+  }
 
+  // walk to one's place in the ranks, keeping the regiment's pace and facing
+  function keepRank(u, R, sx, sy, speed) {
+    const dx = sx - u.x, dy = sy - u.y, dist = Math.hypot(dx, dy);
+    let vx = R.vx + dx * 2.4, vy = R.vy + dy * 2.4;
+    const l = Math.hypot(vx, vy);
+    if (l > speed) { vx *= speed / l; vy *= speed / l; }
+    u.desX = vx; u.desY = vy;
+    // dress the ranks facing the enemy; turn round only to walk somewhere far
+    if (dist > 26 && l > speed * 0.6) u.faceTo = Math.atan2(vy, vx);
+    else u.faceTo = R.role === 'cavalry' && l > 25 ? Math.atan2(vy, vx) : R.angle;
+  }
+
+  function ride(u, R, sx, sy, speed) {
+    const dx = sx - u.x, dy = sy - u.y;
+    let vx = R.vx + dx * 3, vy = R.vy + dy * 3;
+    const l = Math.hypot(vx, vy) || 1;
+    if (l > speed) { vx *= speed / l; vy *= speed / l; }
+    u.desX = vx; u.desY = vy;
+    u.faceTo = l > 20 ? Math.atan2(vy, vx) : R.angle;
+  }
+
+  function melee(u, B, t, speed, dt) {
+    const d = u.def;
     const dx = t.x - u.x, dy = t.y - u.y;
     const dist = Math.hypot(dx, dy) || 0.001;
     const nx = dx / dist, ny = dy / dist;
     const gap = dist - u.r - t.r;
-
-    if (d.ranged) return archer(u, B, t, dist, gap, nx, ny, speed);
-
     if (gap > d.reach) {
       let mx = nx, my = ny;
-      if (gap < 70) {
-        // spread around the target instead of queueing in a line
+      if (gap < 70 && (!u.reg || u.reg.discipline === 0)) {
+        // a mob spreads around its victim instead of queueing in a line
         mx += -ny * u.flankBias * 0.6; my += nx * u.flankBias * 0.6;
         const l = Math.hypot(mx, my); mx /= l; my /= l;
       }
@@ -210,6 +272,7 @@
       u.faceTo = Math.atan2(u.desY, u.desX);
       if (u.atkT < 0) u.engagedT = Math.max(0, u.engagedT - dt);
     } else {
+      u.contactT = B.time;
       u.faceTo = Math.atan2(ny, nx);
       if (u.type === 'spear' && gap < d.reach * 0.5) {
         // spearmen step back to keep the enemy at the tip of the spear
@@ -219,66 +282,61 @@
       }
       u.engagedT += dt;
       if (u.atkCd <= 0 && u.atkT < 0) startAttack(u, t, gap);
-
-      if (u.type === 'knight' && u.engagedT > 3 && u.chargeCd <= 0 && u.hp > u.maxHp * 0.3) {
-        // pull back for another charge
-        u.mode = 1;
-        const side = U.gauss() * 0.8;
-        u.wheelX = U.clamp(u.x - nx * 180 - ny * side * 80, 40, TM.CONFIG.WORLD_W - 40);
-        u.wheelY = U.clamp(u.y - ny * 180 + nx * side * 80, 40, TM.CONFIG.WORLD_H - 40);
-        u.wheelT = 2.6;
-      }
     }
   }
 
-  function knightWheel(u, B, dt, speed) {
-    u.wheelT -= dt;
-    const dx = u.wheelX - u.x, dy = u.wheelY - u.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    if (dist < 22 || u.wheelT <= 0) {
-      u.mode = 0; u.chargeCd = 6; u.engagedT = 0; u.thinkT = 0;
-      return;
-    }
-    u.desX = dx / dist * speed; u.desY = dy / dist * speed;
-    u.faceTo = Math.atan2(dy, dx);
-  }
-
-  function archer(u, B, t, dist, gap, nx, ny, speed) {
+  function archer(u, B, R, t, speed) {
     const d = u.def, r = d.ranged;
     const ne = u.nearEnemy;
     const neD = ne && ne.state === ALIVE ? Math.hypot(ne.x - u.x, ne.y - u.y) - u.r - ne.r : 1e9;
-
     if (neD <= d.reach + 1) {
-      // cornered: stab with a dagger
+      // cornered: stab with a dagger, still trying to slip away
       const ex = ne.x - u.x, ey = ne.y - u.y, l = Math.hypot(ex, ey) || 1;
+      u.contactT = B.time;
       u.faceTo = Math.atan2(ey, ex);
       if (u.atkCd <= 0 && u.atkT < 0) startAttack(u, ne, neD);
-      // still try to slip away
       u.desX = -ex / l * speed * 0.35; u.desY = -ey / l * speed * 0.35;
       return;
     }
-    if (neD < r.minRange && !ne.def.ranged && !ne.fleeing) {
-      // kite: back off away from the threat, drifting home
-      const ex = u.x - ne.x, ey = u.y - ne.y, l = Math.hypot(ex, ey) || 1;
-      const home = B.home[u.team];
-      let mx = ex / l + home.x * 0.3, my = ey / l;
-      if (home.y) my += home.y * 0.3;
-      const ml = Math.hypot(mx, my); mx /= ml; my /= ml;
-      u.desX = mx * speed; u.desY = my * speed;
-      u.faceTo = Math.atan2(my, mx);
+    // the regiment's volley: loose at the given mark
+    if (u.volleyAt && B.time >= u.volleyAt) {
+      const T = u.volleyTarget;
+      u.volleyAt = 0;
+      if (T && T.state === ALIVE && u.rangedCd <= 0.55) {
+        const dist = Math.hypot(T.x - u.x, T.y - u.y);
+        if (dist <= r.range + 35) {
+          u.faceTo = Math.atan2(T.y - u.y, T.x - u.x);
+          B.fireArrow(u, T, dist);
+          u.rangedCd = r.cooldown * U.range(0.88, 0.98); // ready again for the next volley
+          u.shotT = 0;
+        }
+      }
+    }
+    keepRank(u, R, R.slotX(u), R.slotY(u), speed);
+    if (R.order === 'shoot' && t && t.state === ALIVE && Math.abs(u.desX) + Math.abs(u.desY) < speed * 0.8) u.faceTo = Math.atan2(t.y - u.y, t.x - u.x);
+  }
+
+  // fallback for a soldier without a regiment: the old free-for-all behaviour
+  function loose(u, B, t, speed, dt) {
+    const d = u.def;
+    if (!t) {
+      const m = B.march[u.team];
+      if (m.x === 0 && m.y === 0) {
+        if (B.winner === u.team && u.z <= 0 && u.type !== 'giant' && U.rand() < dt * 0.8) u.vz = 70 + U.rand() * 50;
+        return;
+      }
+      u.desX = m.x * speed * 0.8; u.desY = m.y * speed * 0.8;
+      u.faceTo = Math.atan2(m.y, m.x);
       return;
     }
-    if (dist > r.range) {
-      u.desX = nx * speed; u.desY = ny * speed;
-      u.faceTo = Math.atan2(ny, nx);
+    if (d.ranged) {
+      const dist = Math.hypot(t.x - u.x, t.y - u.y);
+      u.faceTo = Math.atan2(t.y - u.y, t.x - u.x);
+      if (dist > d.ranged.range) { u.desX = (t.x - u.x) / dist * speed; u.desY = (t.y - u.y) / dist * speed; return; }
+      if (u.rangedCd <= 0) { B.fireArrow(u, t, dist); u.rangedCd = d.ranged.cooldown * U.range(0.85, 1.25); u.shotT = 0; }
       return;
     }
-    u.faceTo = Math.atan2(ny, nx);
-    if (u.rangedCd <= 0 && Math.abs(U.angDiff(u.facing, u.faceTo)) < 0.4) {
-      B.fireArrow(u, t, dist);
-      u.rangedCd = r.cooldown * U.range(0.85, 1.25);
-      u.shotT = 0;
-    }
+    melee(u, B, t, speed, dt);
   }
 
   function startAttack(u, t, gap) {

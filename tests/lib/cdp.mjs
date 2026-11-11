@@ -26,7 +26,9 @@ export const check = (name, cond, detail) => {
 
 export async function openBrowser() {
   const port = 9300 + Math.floor(Math.random() * 500);
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-test-'));
+  // browser profile lives inside the project (.cache is git-ignored): tests write nothing elsewhere
+  fs.mkdirSync(path.join(ROOT, '.cache'), { recursive: true });
+  const profile = fs.mkdtempSync(path.join(ROOT, '.cache', 'chrome-'));
   const proc = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=1600,900', '--no-first-run', 'about:blank'], { stdio: 'ignore' });
   let list;
   for (let i = 0; i < 100; i++) { try { list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); if (list.length) break; } catch { /* starting */ } await sleep(150); }
