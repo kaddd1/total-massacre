@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>TOTAL MASSACRE — звуковая доска (инструмент)</title>
+<style>
+  body { background: #17140f; color: #ebe4d6; font: 14px "Segoe UI", sans-serif; margin: 20px; max-width: 1100px; }
+  h1 { font-size: 18px; margin: 0 0 6px; } h3 { margin: 16px 0 6px; color: #ffd34d; font-size: 14px; }
+  button { background: #2b251f; color: #ebe4d6; border: 1px solid #4a4036; border-radius: 6px; padding: 5px 10px; margin: 2px; cursor: pointer; font-size: 12px; }
+  button:hover { border-color: #ffd34d; } button.on { background: #4d3d12; border-color: #ffd34d; }
+  .note { color: #9b917f; font-size: 12px; } .row { margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>Звуковая доска</h1>
+<p class="note">Звуки декодируются тем же загрузчиком, что и в игре (js/audio.js): одиночные записи по категориям, заранее смикшированные «толпа»-варианты (m — небольшая схватка, l — сотни бойцов) и фоновые петли, вырезанные из MP3 с точностью до отсчёта. «Серия» проигрывает весь пул подряд, так удобно проверять повторы. Петли играют по кругу, повторный клик их останавливает. Источники и лицензии — assets/sounds/CREDITS.md.</p>
+<div class="row">
+  <button id="load">Загрузить звуки</button> <span id="info" class="note"></span>
+  <label style="margin-left:16px">громкость <input type="range" id="vol" min="0" max="100" value="70"></label>
+  <label style="margin-left:16px"><input type="checkbox" id="vary" checked> разброс высоты ±6%</label>
+</div>
+<div id="out"></div>
+<script src="../js/config.js"></script>
+<script src="../js/sound-data.js"></script>
+<script src="../js/audio.js"></script>
+<script>
+  const info = document.getElementById('info'), out = document.getElementById('out');
+  document.getElementById('load').onclick = async () => {
+    const ctx = new AudioContext(), master = ctx.createGain(); master.connect(ctx.destination);
+    const vol = document.getElementById('vol');
+    master.gain.value = (vol.value / 100) ** 2;
+    vol.oninput = () => { master.gain.value = (vol.value / 100) ** 2; };
+    info.textContent = 'декодирую…';
+    await TM.Audio.load();
+    const A = TM.Audio;
+    info.textContent = `${TM.SOUND_BANK.sounds.length} записей декодировано за ${Math.round(A.loadMs)} мс`;
+    const play = (buf, loop) => {
+      const s = ctx.createBufferSource(); s.buffer = buf; s.loop = !!loop;
+      if (!loop && document.getElementById('vary').checked) s.playbackRate.value = 0.94 + Math.random() * 0.12;
+      s.connect(master); s.start(); return s;
+    };
+    const section = (title, list, loop) => {
+      const h = document.createElement('h3'); h.textContent = `${title} (${list.length})`; out.appendChild(h);
+      if (!loop) {
+        const all = document.createElement('button'); all.textContent = '▶ серия';
+        all.onclick = () => { let t = 0; for (const [, b] of list) { setTimeout(() => play(b), t * 1000); t += Math.min(b.duration, 1.4) + 0.15; } };
+        out.appendChild(all);
+      }
+      for (const [name, buf] of list) {
+        const b = document.createElement('button'); b.textContent = `${name} · ${buf.duration.toFixed(2)}с`;
+        let node = null;
+        b.onclick = () => {
+          if (!loop) return play(buf);
+          if (node) { node.stop(); node = null; b.classList.remove('on'); } else { node = play(buf, true); b.classList.add('on'); }
+        };
+        out.appendChild(b);
+      }
+    };
+    out.innerHTML = '';
+    for (const [cat, arr] of Object.entries(A.pools)) section(cat, arr.map((b, i) => [cat + ' ' + (i + 1), b]));
+    for (const [cat, c] of Object.entries(A.crowds)) section(`${cat}: толпа`, [...c.m.map((b, i) => [`m${i + 1}`, b]), ...c.l.map((b, i) => [`l${i + 1}`, b])]);
+    section('фоновые петли', Object.entries(A.beds), true);
+  };
+</script>
+</body>
+</html>

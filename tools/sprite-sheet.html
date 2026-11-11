@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>TOTAL MASSACRE — sprite sheet (dev tool)</title>
+<style>
+  body { background: #4a5a30; color: #eee; font: 12px Segoe UI, sans-serif; margin: 10px; }
+  canvas { image-rendering: pixelated; display: block; }
+  h3 { margin: 10px 0 2px; }
+</style>
+</head>
+<body>
+<div id="info"></div>
+<canvas id="c"></canvas>
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/sprites.js"></script>
+<script>
+  // Dev tool: shows every generated sprite (team, class, animation, direction).
+  // URL params: ?scale=0..3&zoom=4&team=0&cls=sword,spear&anim=walk,attack&alldirs=1
+  const q = new URLSearchParams(location.search);
+  const si = +(q.get('scale') || 0), Z = +(q.get('zoom') || 4), team = +(q.get('team') || 0);
+  TM.Sprites.init();
+  const set = TM.Sprites.sets[si];
+  document.getElementById('info').textContent =
+    `generated in ${TM.Sprites.genMs.toFixed(0)} ms · scale ${set.s} · atlas ${set.color[0].width}x${set.color[0].height}`;
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const rows = [];
+  const only = q.get('cls'), onlyAnim = q.get('anim');
+  for (const cls of TM.UNIT_ORDER) for (const anim in set.meta[cls]) if ((!only || only.split(',').includes(cls)) && (!onlyAnim || onlyAnim.split(',').includes(anim))) rows.push([cls, anim]);
+  const cellW = 64 * set.s * Z + 6, cellH = 60 * set.s * Z + 6;
+  const dirs = set.nd;
+  cv.width = 120 + dirs * 4 * cellW / 2.2; cv.height = rows.length * cellH;
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#4d5a30'; ctx.fillRect(0, 0, cv.width, cv.height);
+  rows.forEach(([cls, anim], r) => {
+    ctx.fillStyle = '#fff'; ctx.fillText(cls + ' ' + anim, 4, r * cellH + 14);
+    const byDir = set.meta[cls][anim];
+    let x = 110;
+    const nd = q.get('alldirs') ? dirs : Math.min(dirs, 8);
+    for (let d = 0; d < dirs; d += dirs / nd) {
+      for (let f = 0; f < byDir[d].length; f++) {
+        const fr = byDir[d][f].body, sh = byDir[d][f].shadow;
+        const ox = x + 30 * set.s * Z, oy = r * cellH + cellH - 12 * set.s * Z;
+        if (sh) { ctx.globalAlpha = 0.3; ctx.drawImage(set.shadow, sh.x, sh.y, sh.w, sh.h, ox - sh.ax * Z, oy - sh.ay * Z, sh.w * Z, sh.h * Z); ctx.globalAlpha = 1; }
+        ctx.drawImage(set.color[team], fr.x, fr.y, fr.w, fr.h, ox - fr.ax * Z, oy - fr.ay * Z, fr.w * Z, fr.h * Z);
+        x += Math.max(fr.w * Z, 20) + 4;
+      }
+      x += 10;
+    }
+  });
+</script>
+</body>
+</html>

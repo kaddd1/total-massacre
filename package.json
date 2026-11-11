@@ -1,0 +1,13 @@
+{
+  "name": "total-massacre",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Browser mass-battle sandbox. Open index.html — no build or install needed to play.",
+  "scripts": {
+    "test": "node tests/sim.test.mjs && node tests/browser.test.mjs && node tests/audio-mix.test.mjs",
+    "test:sim": "node tests/sim.test.mjs",
+    "test:browser": "node tests/browser.test.mjs",
+    "test:audio": "node tests/audio-mix.test.mjs",
+    "build:sounds": "node tools/build-sound-bundle.mjs"
+  }
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { margin: 0; background: #111; color: #ddd; font: 11px Consolas, monospace; }
+canvas { display: block; }
+</style></head><body>
+<canvas id="c"></canvas>
+<script>
+// Audio lab: decode files (any format Chrome supports) to mono 44.1 kHz and draw contact sheets.
+const SR = 44100;
+const cache = new Map();
+async function decodeUrl(url) {
+  if (cache.has(url)) return cache.get(url);
+  const ab = await (await fetch(url)).arrayBuffer();
+  const ctx = new OfflineAudioContext(1, 1, SR);
+  const buf = await ctx.decodeAudioData(ab);
+  const n = buf.length, mono = new Float32Array(n);
+  for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < n; i++) mono[i] += d[i] / buf.numberOfChannels; }
+  const r = { mono, channels: buf.numberOfChannels, sr: buf.sampleRate };
+  cache.set(url, r);
+  return r;
+}
+// Int16 base64 of a [start, end) slice (seconds) for transfer to node
+async function pcm(url, t0, t1) {
+  const { mono } = await decodeUrl(url);
+  const a = Math.max(0, Math.floor((t0 || 0) * SR)), b = Math.min(mono.length, t1 ? Math.floor(t1 * SR) : mono.length);
+  // sources with overs (>0 dBFS floats) are scaled down instead of clipped
+  let pk = 0; for (let i = a; i < b; i++) { const v = Math.abs(mono[i]); if (v > pk) pk = v; }
+  const k = pk > 0.999 ? 0.999 / pk : 1;
+  const out = new Int16Array(b - a);
+  for (let i = a; i < b; i++) { const v = Math.max(-1, Math.min(1, mono[i] * k)); out[i - a] = v < 0 ? v * 32768 : v * 32767; }
+  const u8 = new Uint8Array(out.buffer); let s = '';
+  for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode.apply(null, u8.subarray(i, i + 32768));
+  return { len: b - a, b64: btoa(s) };
+}
+async function info(url) {
+  const { mono, channels } = await decodeUrl(url);
+  let pk = 0, e = 0; for (const v of mono) { const a = Math.abs(v); if (a > pk) pk = a; e += v * v; }
+  return { dur: +(mono.length / SR).toFixed(3), channels, peak: +pk.toFixed(3), rms: +Math.sqrt(e / mono.length).toFixed(4) };
+}
+// Radix-2 FFT magnitude (in place on re/im)
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0; for (let j = 0; j < len / 2; j++) { const ar = re[i + j + len / 2] * cr - im[i + j + len / 2] * ci, ai = re[i + j + len / 2] * ci + im[i + j + len / 2] * cr; re[i + j + len / 2] = re[i + j] - ar; im[i + j + len / 2] = im[i + j] - ai; re[i + j] += ar; im[i + j] += ai; const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t; } }
+  }
+}
+// items: [{label, url, t0, t1}] or {label, pcm: Float32Array}; draws a grid of tiles: waveform (top) + log-freq spectrogram
+async function sheet(items, opts) {
+  opts = opts || {};
+  const cols = opts.cols || 4, W = opts.w || 360, H = opts.h || 170, maxDur = opts.maxDur || 0;
+  const cv = document.getElementById('c'); cv.width = cols * W; cv.height = Math.ceil(items.length / cols) * H;
+  const g = cv.getContext('2d'); g.fillStyle = '#111'; g.fillRect(0, 0, cv.width, cv.height);
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k], ox = (k % cols) * W, oy = Math.floor(k / cols) * H;
+    let data;
+    if (it.url) { const d = await decodeUrl(it.url); const a = Math.floor((it.t0 || 0) * SR), b = it.t1 ? Math.floor(it.t1 * SR) : d.mono.length; data = d.mono.subarray(a, Math.min(b, d.mono.length)); }
+    else data = it.data;
+    const dur = data.length / SR, span = maxDur || dur;
+    const pw = W - 6, wh = 40, sh = H - wh - 22;
+    // waveform envelope (peak per column), dB-ish scale
+    g.fillStyle = '#1b1b1b'; g.fillRect(ox + 3, oy + 16, pw, wh);
+    let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v));
+    for (let x = 0; x < pw; x++) {
+      const a = Math.floor(x / pw * span * SR), b = Math.floor((x + 1) / pw * span * SR);
+      if (a >= data.length) break;
+      let m = 0; for (let i = a; i < Math.min(b, data.length); i++) m = Math.max(m, Math.abs(data[i]));
+      const h = Math.max(0, 1 + Math.log10(m + 1e-6) / 3) * wh; // 60 dB range
+      g.fillStyle = m > 0.98 ? '#ff3030' : '#7fd17f'; g.fillRect(ox + 3 + x, oy + 16 + wh - h, 1, h);
+    }
+    // spectrogram: 1024 FFT, hop by width, log frequency 40 Hz..20 kHz, 70 dB range
+    const N = 1024, win = new Float32Array(N); for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+    const re = new Float32Array(N), im = new Float32Array(N);
+    const img = g.createImageData(pw, sh);
+    for (let x = 0; x < pw; x++) {
+      const c = Math.floor(x / pw * span * SR);
+      if (c >= data.length) break;
+      for (let i = 0; i < N; i++) { const s = c - N / 2 + i; re[i] = (s >= 0 && s < data.length ? data[s] : 0) * win[i]; im[i] = 0; }
+      fft(re, im);
+      for (let y = 0; y < sh; y++) {
+        const f = 40 * Math.pow(500, (sh - 1 - y) / (sh - 1)), bin = Math.min(N / 2 - 1, Math.round(f / SR * N));
+        const mag = Math.hypot(re[bin], im[bin]) / (N / 4) / (pk + 1e-9);
+        const db = 20 * Math.log10(mag + 1e-9), v = Math.max(0, Math.min(1, (db + 70) / 70));
+        const o = (y * pw + x) * 4;
+        img.data[o] = 255 * Math.min(1, v * 1.6); img.data[o + 1] = 255 * Math.max(0, v * 1.8 - 0.6); img.data[o + 2] = 120 * Math.max(0, 1 - v * 2) + 255 * Math.max(0, v - 0.75) * 4; img.data[o + 3] = 255;
+      }
+    }
+    g.putImageData(img, ox + 3, oy + 16 + wh + 2);
+    // labels: name, duration, freq ticks
+    g.fillStyle = '#eee'; g.fillText(`${it.label}  ${dur.toFixed(2)}s pk ${pk.toFixed(2)}`.slice(0, 58), ox + 4, oy + 11);
+    g.fillStyle = 'rgba(255,255,255,0.5)';
+    for (const f of [100, 1000, 10000]) { const y = oy + 16 + wh + 2 + (sh - 1) * (1 - Math.log(f / 40) / Math.log(500)); g.fillRect(ox + 3, y, 4, 1); g.fillText(f >= 1000 ? f / 1000 + 'k' : f, ox + 8, y + 3); }
+    if (maxDur) { g.fillStyle = 'rgba(255,255,255,0.25)'; for (let t = 0.5; t < span; t += 0.5) g.fillRect(ox + 3 + t / span * pw, oy + 16, 1, 3); }
+  }
+  return { w: cv.width, h: cv.height };
+}
+window.lab = { decodeUrl, pcm, info, sheet };
+</script>
+</body></html>

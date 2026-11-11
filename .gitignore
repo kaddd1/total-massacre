@@ -1,0 +1,5 @@
+# local scratch / test artefacts (never committed)
+.work/
+.cache/
+node_modules/
+tools/sound-pipeline/work/
