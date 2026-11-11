@@ -141,7 +141,8 @@
     if (R && d.ranged) {
       // a cornered archer draws his dagger; otherwise he aims where his regiment shoots
       u.target = near && Math.sqrt(nearD2) - u.r - near.r < d.reach + 3 ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
-      if (u.target) B.contact[u.team] = true;
+      // contact = an enemy within shooting range (the march drums and the HUD stage go by it)
+      if (u.target && Math.hypot(u.target.x - u.x, u.target.y - u.y) < d.ranged.range + 30) B.contact[u.team] = true;
       return;
     }
     if (best) {

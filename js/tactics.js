@@ -20,7 +20,6 @@
   const REG_W = { sword: 240, spear: 240, archer: 280, knight: 140, giant: 260 }; // target frontage of a regiment
   const MIN_REG = { sword: 12, spear: 12, archer: 12, knight: 5, giant: 1 };      // smallest regiment when splitting
   const HORDE_REG = 40;                      // men per regiment in a horde
-  const TWO_PI = Math.PI * 2;
 
   // ---------------------------------------------------------------- partition of a deployment
   // spots: [{type, x, y, blk}] in world coordinates; returns a regiment index for every spot.
@@ -81,10 +80,9 @@
       this.routing = false; this.alive = members.length; this.n = members.length; this.fleeing = 0;
       this.strength = 1; this.lag = 0; this.engaged = 0; this.engagedT = 0; this.cx = this.ax; this.cy = this.ay;
       this.halfW = 10; this.front = 0; this.back = 0; this.radius = 10;
-      this.flankHits = 0; this.volleyT = 0; this.phaseT = 0; this.waypoint = null;
+      this.flankHits = 0; this.volleyT = 0; this.phaseT = 0; this.lostTenths = 0;
       this.lx = 1; this.ly = 0; this.lanceT = 3; this.committed = false; this.shockT = -99;
-      this.compactCount = -1; this.supportOf = null; this.supOff = null; this.events = {};
-      this.braced = false;
+      this.compactCount = -1; this.supportOf = null; this.supOff = null;
     }
 
     setSlot(u, i) { const s = this.slots[i]; u.slot = i; u.sdep = s.dep; u.slat = s.lat; u.rank = s.rank; }
@@ -197,7 +195,7 @@
 
   // ---------------------------------------------------------------- army command
   function general(B, t) {
-    const T = B.tac, G = T.gen[t], E = T.gen[1 - t];
+    const T = B.tac, G = T.gen[t];
     const mine = T.regs.filter((r) => r.team === t && r.active());
     const foes = T.regs.filter((r) => r.team !== t && r.active());
     let mx = 0, my = 0, mn = 0, ex = 0, ey = 0, en = 0;
@@ -227,7 +225,6 @@
       G.standT += THINK;
       if (!wantDefend || (G.standT > 30 && !B.contact[1 - t])) G.stance = 'attack';
     } else if (wantDefend && !B.contact[t] && B.time < 5) { G.stance = 'defend'; G.standT = 0; }
-    void E;
   }
 
   // ---------------------------------------------------------------- target choice
@@ -391,17 +388,29 @@
     if (R.volleyT <= 0) volley(R, B, best);
   }
 
+  // Is it safe to drop arrows on enemy v? Arrows scatter ~15 px and fly ~1.3 s, so keep a berth around
+  // each of our men near v: wider for a giant (a big target) and for men running in (they'll be there
+  // when the arrows land).
+  const fbuf = [];
+  function clearShot(B, v, team) {
+    const o0 = v.nearEnemy;                       // v's nearest opponent = our nearest man
+    if (!o0 || o0.state !== ALIVE || v.nearEnemyD > 160) return true;
+    const n = B.grid.query(v.x, v.y, 130, fbuf);
+    for (let i = 0; i < n; i++) {
+      const o = fbuf[i];
+      if (o.team !== team || o.state !== ALIVE) continue;
+      const berth = (o.r > 10 ? 55 : 30) + Math.min(60, Math.hypot(o.vx, o.vy) * 1.2);
+      if (Math.hypot(o.x - v.x, o.y - v.y) - o.r - v.r < berth) return false;
+    }
+    return true;
+  }
+
   // A volley: every loaded archer looses within ~0.4 s at the target regiment. When it is fighting our
   // own men, aim at its rear ranks (the men farthest from us) to keep arrows out of the melee.
   function volley(R, B, E) {
-    // never into a melee: skip enemies with one of our men close to them (the arrows scatter ~15 px)
+    // never into a melee: skip enemies with one of our men close to them
     const tgts = [];
-    for (const u of E.members) {
-      if (u.state !== ALIVE) continue;
-      const o = u.nearEnemy;
-      if (o && o.state === ALIVE && u.nearEnemyD - o.r - u.r < (o.r > 10 ? 55 : 30)) continue; // wider berth for a giant
-      tgts.push(u);
-    }
+    for (const u of E.members) if (u.state === ALIVE && clearShot(B, u, R.team)) tgts.push(u);
     if (!tgts.length) { R.volleyT = 0.2; return; }
     const fx = R.frontX(), fy = R.frontY();
     if (E.engaged > 0.15) {
@@ -518,7 +527,9 @@
     const ourFight = T.regs.some((r) => r.team === R.team && r.role !== 'cavalry' && r.role !== 'missile' && r.engaged > 0.2);
     const theirHorse = foes.some((r) => r.role === 'cavalry' && r.active() && gapTo(R, r) < 320);
     // wait on the flank until a charge makes sense: enemy horse nearby, an open target, or the lines have clinched
-    const worth = R.committed || theirHorse || tgt.routing || ourFight || tgt.engaged > 0.2 || (!wall && tgt.role === 'missile') || B.time > 40;
+    // (with no formed infantry to wait for, the horse is the army: it attacks at once)
+    const line = T.regs.some((r) => r.team === R.team && r.active() && (r.role === 'front' || r.role === 'support') && r.discipline);
+    const worth = R.committed || !line || theirHorse || tgt.routing || ourFight || tgt.engaged > 0.2 || (!wall && tgt.role === 'missile') || B.time > 40;
     R.committed = worth;   // once the horse is loose it keeps attacking: no riding back to the line mid-manoeuvre
     if (!worth) {
       R.setOrder('screen');
@@ -575,8 +586,8 @@
     // every tenth of the regiment lost shakes the survivors
     // (a mob takes heart from its mass: a chunk of a horde is shaken half as much)
     const lost = Math.floor((1 - R.strength) * 10);
-    if (lost > (R.lostTenths || 0)) {
-      const hit = (lost - (R.lostTenths || 0)) * (R.discipline ? 5 : 2.5);
+    if (lost > R.lostTenths) {
+      const hit = (lost - R.lostTenths) * (R.discipline ? 5 : 2.5);
       R.lostTenths = lost;
       if (B.opts.morale) for (const u of R.members) if (u.state === ALIVE && !u.def.fearless) u.morale -= hit;
     }

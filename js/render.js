@@ -32,9 +32,13 @@
       if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
       if (tg && !moving && u.rangedCd < 1.1 && Math.hypot(tg.x - u.x, tg.y - u.y) <= u.def.ranged.range + 30) { A = 'aim'; F = 0; return; }
     } else if (t === 'spear') {
-      if (tg && Math.abs(tg.x - u.x) + Math.abs(tg.y - u.y) < 130) { A = moving ? 'walkReady' : 'ready'; F = moving ? wf : 0; return; }
+      // spear levelled at a close enemy, and whenever the regiment plants its pikes or goes in
+      const o = u.reg && u.reg.order;
+      if ((tg && Math.abs(tg.x - u.x) + Math.abs(tg.y - u.y) < 130) || o === 'brace' || o === 'charge' || o === 'engage') { A = moving ? 'walkReady' : 'ready'; F = moving ? wf : 0; return; }
     } else if (t === 'knight') {
-      if (tg && u.mode === 0) { A = moving ? 'charge' : 'ready'; F = moving ? wf : 0; return; }
+      // lance down at a target, and through the whole charge of the regiment
+      const o = u.reg && u.reg.order;
+      if ((tg || o === 'approach' || o === 'lance') && u.mode === 0) { A = moving ? 'charge' : 'ready'; F = moving ? wf : 0; return; }
     }
     if (moving) { A = 'walk'; F = wf; } else { A = 'idle'; F = 0; }
   }
@@ -191,18 +195,23 @@
           ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(Math.round(R.target.cx * D + ox), Math.round(R.target.cy * D + oy)); ctx.stroke();
         }
         // facing arrow
-        if (R.routing) R.fcx = R.fcx; else {
-        ctx.globalAlpha = 0.9; ctx.strokeStyle = '#fff';
-        const len = Math.max(14, (R.front + 12) * D), ex = cx + R.cos * len, ey = cy + R.sin * len;
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
-        ctx.lineTo(ex - R.cos * 6 * lw - R.sin * 4 * lw, ey - R.sin * 6 * lw + R.cos * 4 * lw);
-        ctx.moveTo(ex, ey); ctx.lineTo(ex - R.cos * 6 * lw + R.sin * 4 * lw, ey - R.sin * 6 * lw - R.cos * 4 * lw);
-        ctx.stroke();
+        if (!R.routing) {
+          ctx.globalAlpha = 0.9; ctx.strokeStyle = '#fff';
+          const len = Math.max(14, (R.front + 12) * D), ex = cx + R.cos * len, ey = cy + R.sin * len;
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+          ctx.lineTo(ex - R.cos * 6 * lw - R.sin * 4 * lw, ey - R.sin * 6 * lw + R.cos * 4 * lw);
+          ctx.moveTo(ex, ey); ctx.lineTo(ex - R.cos * 6 * lw + R.sin * 4 * lw, ey - R.sin * 6 * lw - R.cos * 4 * lw);
+          ctx.stroke();
         }
         ctx.globalAlpha = 1;
         const label = R.routing ? `${R.name} ${R.fleeing}: бегут` : `${R.name} ${R.n}: ${ON[R.order] || R.order}`;
         const cv = TM.Sprites.text(label, R.routing ? '#ffb347' : R.engaged > 0.15 ? '#ff8c80' : '#ffffff');
-        ctx.drawImage(cv, cx - ((cv.width * k) >> 1), cy - Math.round((R.radius + 14) * D) - cv.height * k, cv.width * k, cv.height * k);
+        // above the regiment's on-screen extent; a reserve labels below it, so the labels of a
+        // regiment and of the reserve standing right behind it don't overprint each other
+        const hy = R.routing ? 8 : Math.abs(R.sin) * (R.front - R.back) / 2 + Math.abs(R.cos) * R.halfW;
+        const below = R.order === 'support';
+        const ly = below ? cy + Math.round((hy + 8) * D) : cy - Math.round((hy + 8) * D) - cv.height * k;
+        ctx.drawImage(cv, cx - ((cv.width * k) >> 1), ly, cv.width * k, cv.height * k);
       }
     }
 

@@ -272,6 +272,7 @@
         `<span class="tt-name t${u.team}">${u.def.name}</span> · ${team.name.toLowerCase()}` +
         (u.fleeing ? ' · <span class="panic">БЕЖИТ</span>' : '') +
         `<br>HP ${Math.ceil(u.hp)}/${u.maxHp} · убийств: ${u.kills}` +
+        (u.reg && u.reg.alive ? `<br>Полк: ${u.reg.name} (${u.reg.n}) — ${u.reg.routing ? 'бегут' : TM.Tactics.ORDER_NAME[u.reg.order] || u.reg.order}` : '') +
         (u.def.fearless ? '<br>Мораль: не знает страха' : `<br>Мораль ${m}%<span class="mbar"><i style="width:${m}%;background:${mc}"></i></span>`);
       tt.style.display = 'block';
       const w = tt.offsetWidth, h = tt.offsetHeight;
