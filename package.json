@@ -2,6 +2,7 @@
   "name": "total-massacre",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Browser sandbox for mass medieval battles. Open index.html: no build or install needed to play.",
   "scripts": {
     "test": "node tests/sim.test.mjs && node tests/browser.test.mjs && node tests/audio-mix.test.mjs",

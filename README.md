@@ -118,4 +118,4 @@ scenario directly; see `debugParams` in `js/main.js`.
 All sound effects are CC0 recordings from Kenney, OpenGameArt and Freesound; sources and authors
 are listed in [assets/sounds/CREDITS.md](assets/sounds/CREDITS.md).
 
-The project code does not have a license yet.
+The code is released under the [MIT License](LICENSE). The sound recordings keep their original CC0 terms.
