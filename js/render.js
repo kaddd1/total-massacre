@@ -336,9 +336,9 @@
         const f0 = P(R.front, -R.halfW), f1 = P(R.front, R.halfW), b1 = P(R.back, R.halfW), b0 = P(R.back, -R.halfW);
         ctx.globalAlpha = 0.07; ctx.fillStyle = T.light;
         ctx.beginPath(); ctx.moveTo(f0[0], f0[1]); ctx.lineTo(f1[0], f1[1]); ctx.lineTo(b1[0], b1[1]); ctx.lineTo(b0[0], b0[1]); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 0.45; ctx.strokeStyle = T.light; ctx.lineWidth = Math.max(1, k);
+        ctx.globalAlpha = 0.4; ctx.strokeStyle = T.light; ctx.lineWidth = 1;
         ctx.stroke();
-        ctx.globalAlpha = 0.95; ctx.lineWidth = 2.5 * k;
+        ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5 + k * 0.75;
         ctx.strokeStyle = R.engaged > 0.15 ? '#ff8c80' : T.light;
         ctx.beginPath(); ctx.moveTo(f0[0], f0[1]); ctx.lineTo(f1[0], f1[1]); ctx.stroke();
         const fx = (f0[0] + f1[0]) / 2, fy = (f0[1] + f1[1]) / 2;
@@ -353,9 +353,9 @@
           const ex = sx(E.cx), ey = sy(E.cy), dx = ex - fx, dy = ey - fy, l = Math.hypot(dx, dy) || 1;
           const stop = Math.min(l * 0.8, Math.max(8, E.radius * D * 0.6));
           const tx = ex - dx / l * stop, ty = ey - dy / l * stop;
-          if (R.order === 'shoot') { ctx.globalAlpha = 0.75; arrow(fx, fy, tx, ty, '#ffd34d', Math.max(1, k), true, 6); }
-          else if (R.role === 'cavalry' && (R.order === 'approach' || R.order === 'lance' || R.order === 'flank' || R.order === 'melee')) { ctx.globalAlpha = 0.9; arrow(fx, fy, tx, ty, '#ff9a3c', 2 * k, false, 9); }
-          else if ((R.order === 'charge' || R.order === 'engage') && l > 40 * k) { ctx.globalAlpha = 0.85; arrow(fx, fy, tx, ty, '#ff6a58', 2 * k, false, 9); }
+          if (R.order === 'shoot') { ctx.globalAlpha = 0.75; arrow(fx, fy, tx, ty, '#ffd34d', 1 + k * 0.5, true, 6); }
+          else if (R.role === 'cavalry' && (R.order === 'approach' || R.order === 'lance' || R.order === 'flank' || R.order === 'melee')) { ctx.globalAlpha = 0.9; arrow(fx, fy, tx, ty, '#ff9a3c', 1.5 + k * 0.75, false, 9); }
+          else if ((R.order === 'charge' || R.order === 'engage') && l > 40 * k) { ctx.globalAlpha = 0.85; arrow(fx, fy, tx, ty, '#ff6a58', 1.5 + k * 0.75, false, 9); }
         }
         // the label goes under the footprint (as it is seen on the screen), or over it
         labels.push({ x: (f0[0] + f1[0] + b0[0] + b1[0]) / 4, y: Math.max(f0[1], f1[1], b0[1], b1[1]) + 3 * k, y2: Math.min(f0[1], f1[1], b0[1], b1[1]) - 3 * k, text: `${R.name} ${R.n} · ${ON[R.order] || R.order}`, col: R.engaged > 0.15 ? '#ff8c80' : '#ffffff' });
