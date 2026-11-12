@@ -98,7 +98,7 @@
       this.dpr = 1; this.vw = 1; this.vh = 1;
       this.order = []; this.lastB = null;
       this.vis = []; this.visFr = [];
-      this.std = new Map(); this.stdB = null; this.bearers = new Map();
+      this.std = new Map(); this.stdB = null; this.bearers = new Map(); this.fallen = [];
       this.resize();
     }
 
@@ -106,13 +106,13 @@
     updateStandards(B, fx) {
       const map = this.bearers;
       map.clear();
-      if (B !== this.stdB) { this.stdB = B; this.std = new Map(); }
+      if (B !== this.stdB) { this.stdB = B; this.std = new Map(); this.fallen = []; }
       if (!B.tac) return map;
       for (const R of B.tac.regs) {
         let s = this.std.get(R);
         if (!s) { s = { R, bearer: null, phase: Math.random() * 4, x: R.cx, y: R.cy, up: true, falls: 0 }; this.std.set(R, s); }
         if (R.routing || R.n === 0) {
-          if (s.up && s.bearer && (R.routing || R.alive === 0) && s.falls < 2 && B.state !== 'deploy') { fx.stampStandard(s.x, s.y, R.team); s.falls++; }
+          if (s.up && s.bearer && (R.routing || R.alive === 0) && s.falls < 2 && B.state !== 'deploy') { this.fallen.push({ x: s.x, y: s.y, team: R.team }); s.falls++; }
           s.up = false; s.bearer = null;
           continue;
         }
@@ -124,6 +124,20 @@
         map.set(b, s);
       }
       return map;
+    }
+
+    // Standards dropped where regiments broke or died: they stay on the field, above the bodies,
+    // so after the battle the field shows where each regiment gave way.
+    drawFallen(ctx, D, ox, oy, n, vx0, vy0, vx1, vy1) {
+      const list = this.fallen;
+      if (!list.length) return;
+      const S = TM.Sprites, sc = D >= 0.999 ? n : Math.max(0.6, D);
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i];
+        if (f.x < vx0 - 20 || f.x > vx1 + 20 || f.y < vy0 - 20 || f.y > vy1 + 20) continue;
+        const cv = S.fallen[f.team];
+        ctx.drawImage(cv, Math.round(f.x * D + ox - 9 * sc), Math.round(f.y * D + oy - 6 * sc), Math.round(cv.width * sc), Math.round(cv.height * sc));
+      }
     }
 
     // the standard above its bearer: close up it is part of the scene (art scale, depth-sorted);
@@ -230,6 +244,7 @@
         }
         ctx.globalAlpha = 1;
       }
+      this.drawFallen(ctx, D, ox, oy, n, vx0, vy0, vx1, vy1);
       this.drawArrowShadows(ctx, B.arrows, D, ox, oy, n, vx0, vy0, vx1, vy1);
       this.drawWaves(ctx, fx, D, ox, oy, n);
       // the regiment under the mouse (its chip in the HUD, or one of its soldiers) is outlined

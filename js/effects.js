@@ -367,11 +367,6 @@
       TM.Sprites.stampCorpse(this.g, u);
     }
 
-    // a regiment's standard dropped where the regiment broke or died
-    stampStandard(x, y, team) {
-      const cv = TM.Sprites.fallen[team];
-      this.g.drawImage(cv, Math.round(x) - 9, Math.round(y) - 6);
-    }
   }
 
   Effects.P_BLOOD = P_BLOOD; Effects.P_SPARK = P_SPARK; Effects.P_DUST = P_DUST; Effects.P_SPLINTER = P_SPLINTER;
