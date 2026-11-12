@@ -185,10 +185,10 @@
           if (u.state !== 0 || u.z > 0.5) continue;
           const sp = Math.hypot(u.vx, u.vy);
           if (cav) {
-            if (sp < 40 || R() > dt * 6 * sp / u.def.speed) continue;
+            if (sp < 40 || R() > dt * 4.5 * sp / u.def.speed) continue;
             const ix = u.vx / sp, iy = u.vy / sp;
             this.spawn(P_DUST, u.x - ix * 8 + gauss() * 3, u.y - iy * 6 + gauss() * 2 + 1, 1,
-              -ix * 14 + gauss() * 9, -iy * 10 + gauss() * 6, 6 + R() * 10, 0.6 + R() * 0.7, 2.5 + R() * 2.5);
+              -ix * 14 + gauss() * 9, -iy * 10 + gauss() * 6, 6 + R() * 10, 0.55 + R() * 0.55, 2.8 + R() * 2.5);
           } else {
             if (sp < 28 || R() > dt * 0.6) continue;
             this.spawn(P_DUST, u.x + gauss() * 2, u.y + 2, 1, gauss() * 8, gauss() * 5, 4 + R() * 6, 0.45 + R() * 0.4, 1.8 + R() * 1.5);

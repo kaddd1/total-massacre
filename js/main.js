@@ -263,11 +263,11 @@
     record(B, final) {
       let h = this.hist;
       if (!h || h.B !== B) h = this.hist = { B, t: [], a: [[], []], next: 0 };
-      const t = B.endTime ? Math.min(B.time, B.endTime) : B.time;   // the chart ends with the battle
-      if (h.t.length && h.t[h.t.length - 1] >= t) return;
-      if (!final && t < h.next && t !== B.endTime) return;
-      h.next = t + 0.5;
-      h.t.push(t);
+      const now = B.endTime ? Math.min(B.time, B.endTime) : B.time;   // the chart ends with the battle
+      if (h.t.length && h.t[h.t.length - 1] >= now) return;
+      if (!final && now < h.next && now !== B.endTime) return;
+      h.next = now + 0.5;
+      h.t.push(now);
       for (let t = 0; t < 2; t++) h.a[t].push(B.stats[t].alive - B.stats[t].fleeing);
     },
 

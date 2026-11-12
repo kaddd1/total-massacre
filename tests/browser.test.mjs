@@ -236,6 +236,12 @@ async function viewTests(b) {
   await sleep(3500);
   check('the result screen shows the course of the battle', await b.ev(`!document.getElementById('result').classList.contains('hidden') && !!document.getElementById('rchart') && TM.Game.hist.t.length >= 3`));
   check('the chart ends when the battle was decided', await b.ev(`(() => { const h = TM.Game.hist, B = TM.Game.battle; return Math.abs(h.t[h.t.length - 1] - B.endTime) < 0.6; })()`));
+  const hb = await b.ev(`(() => { const e = document.getElementById('res-hero'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  check('the hero of the battle has a "show" button', !!hb);
+  if (hb) {
+    await b.click(hb.x, hb.y); await sleep(1000);
+    check('it shows the hero close up', await b.ev(`(() => { const m = TM.Game.battle.mvp(), c = TM.Game.cam; return document.getElementById('result').classList.contains('hidden') && Math.hypot(c.x - m.x, c.y - m.y) < 40 && c.view() * c.dpr >= 2.99; })()`));
+  }
 }
 
 // ------------------------------------------------------------------ run

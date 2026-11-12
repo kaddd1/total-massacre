@@ -326,8 +326,8 @@
     return { P, bob };
   }
 
-  function shield(P, c, yaw, r1, r2, round) {
-    const R = rotZ(yaw);
+  function shield(P, c, yaw, r1, r2, round) { shieldM(P, c, rotZ(yaw), r1, r2, round); }
+  function shieldM(P, c, R, r1, r2, round) {
     const n = apply(R, [1, 0, 0]);
     P.push(E(add(c, mul(n, -0.3)), [0.45, r1 + 0.35, r2 + 0.35], M.trim, { R }));
     P.push(E(c, [0.55, r1, r2], M.team, { R }));
@@ -388,6 +388,14 @@
       if (anim === 'flee') {
         const [r, l] = RAISED(0.3);
         return humanoid({ phase: PH(f), run: true, gear: 'helm', belt: true, rHand: r, lHand: l }).P;
+      }
+      if (anim === 'block') {
+        // shield up over the head against arrows, sword lowered
+        const lHand = [1.5, -1.5, 13.2];
+        const hu = humanoid({ gear: 'helm', belt: true, rHand: [1.7, 3.4, 7.2], lHand });
+        sword(hu.P, [1.7, 3.4, 7.2], [0.6, 0.15, 0.78]);
+        shieldM(hu.P, [1.9, -0.7, 15.6], matMul(rotZ(-0.2), rotY(1.15)), 3.0, 3.45, false);
+        return hu.P;
       }
       const ph = anim === 'walk' ? PH(f) : null;
       const swing = ph == null ? 0 : Math.sin(ph);
@@ -603,7 +611,7 @@
   }
 
   const ANIMS = {
-    sword: [['idle', 1], ['walk', 4], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
+    sword: [['idle', 1], ['walk', 4], ['attack', 3], ['hurt', 1], ['block', 1], ['flee', 4], ['death', 3]],
     spear: [['idle', 1], ['walk', 4], ['ready', 1], ['walkReady', 4], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
     archer: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
     knight: [['idle', 1], ['walk', 4], ['ready', 1], ['charge', 4], ['attack', 3], ['death', 3]],

@@ -360,6 +360,7 @@
       }
       if (kind === 'arrow') {
         if (v.def.block && !v.fleeing && U.rand() < v.def.block) {
+          v.blockT = this.time;
           fx.sparks(v.x, v.y, v.z, 3);
           fx.impact(v.x, v.y, v.z, nx, ny, 'block');
           this.snd('block', v.x, v.y);

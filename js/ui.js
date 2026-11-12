@@ -419,7 +419,7 @@
       rows += `<tr class="total"><td>Итого</td><td>${s0.deployed} <span class="dim">→</span> ${s0.alive}</td><td>${s0.kills}</td><td>${s1.deployed} <span class="dim">→</span> ${s1.alive}</td><td>${s1.kills}</td></tr>`;
       const mvp = B.mvp();
       const mvpHtml = mvp
-        ? `<div class="mvp">🏆 Герой битвы: <b>${mvp.def.name}</b> (${TM.TEAMS[mvp.team].name.toLowerCase()}) — ${mvp.kills} убийств, ${Math.round(mvp.dmg)} урона${mvp.state === TM.Units.ALIVE ? ', выжил' : ', пал в бою'}</div>`
+        ? `<div class="mvp">🏆 Герой битвы: <b>${mvp.def.name}</b> (${TM.TEAMS[mvp.team].name.toLowerCase()}) — ${mvp.kills} убийств, ${Math.round(mvp.dmg)} урона${mvp.state === TM.Units.ALIVE ? ', выжил' : ', пал в бою'} <button class="mvp-go" id="res-hero">${mvp.state === TM.Units.ALIVE ? 'Показать' : 'Где пал'}</button></div>`
         : '';
       el.innerHTML = `
         <div class="card result-card">
@@ -442,6 +442,13 @@
       $('res-restart').onclick = () => this.game.restart();
       $('res-view').onclick = () => el.classList.add('hidden');
       $('res-new').onclick = () => this.game.toSetup();
+      if (mvp) $('res-hero').onclick = () => {
+        // close-up of the hero (followed while he lives), or of the place where he fell
+        const g = this.game;
+        el.classList.add('hidden');
+        g.flyTo(mvp.x, mvp.y, 3 / g.cam.dpr);
+        if (mvp.state === TM.Units.ALIVE) g.cam.follow = mvp;
+      };
     },
 
     // ---------------- battle chart (result screen) ----------------

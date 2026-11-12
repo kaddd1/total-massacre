@@ -14,7 +14,7 @@
 
   // ---------------------------------------------------------------- animation choice
   // Visual-only state machine: reads simulation state, never writes it.
-  let A = 'idle', F = 0, WIN = -1;
+  let A = 'idle', F = 0, WIN = -1, NOW = 0;
   const HURT = { sword: 1, spear: 1, archer: 1 };
   function choose(u) {
     if (u.state === DYING) { A = 'death'; F = u.deathT < 0.12 ? 0 : u.deathT < 0.26 ? 1 : 2; return; }
@@ -32,15 +32,19 @@
       return;
     }
     if (u.hitFlash > 0.03 && HURT[t]) { A = 'hurt'; F = 0; return; } // rocked back by a blow
+    if (t === 'sword' && NOW - u.blockT < 0.45) { A = 'block'; F = 0; return; } // an arrow on the shield
     const tg = u.target && u.target.state === ALIVE ? u.target : null;
     // formed infantry in its place in the ranks marches in step with the whole regiment
-    const R = u.reg;
-    let wph = u.walk;
-    if (R && R.discipline && R._wph !== undefined && (R.role === 'front' || R.role === 'support' || R.role === 'missile')) {
-      const dx = u.x - R.slotX(u), dy = u.y - R.slotY(u);
-      if (dx * dx + dy * dy < 100) wph = R._wph;
+    let wf = 0;
+    if (moving) {
+      const R = u.reg;
+      let wph = u.walk;
+      if (R && R.discipline && R._wph !== undefined && (R.role === 'front' || R.role === 'support' || R.role === 'missile')) {
+        const dx = u.x - R.slotX(u), dy = u.y - R.slotY(u);
+        if (dx * dx + dy * dy < 100) wph = R._wph;
+      }
+      wf = ((Math.floor(wph / (Math.PI / 2)) % 4) + 4) % 4;
     }
-    const wf = ((Math.floor(wph / (Math.PI / 2)) % 4) + 4) % 4;
     if (t === 'archer') {
       if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
       if (tg && !moving && u.rangedCd < 1.1 && Math.hypot(tg.x - u.x, tg.y - u.y) <= u.def.ranged.range + 30) { A = 'aim'; F = 0; return; }
@@ -80,6 +84,12 @@
     brace: ['#efe9d8', 45, 1.8], reserve: [null, 55, 2], volley: ['#ffd34d', 35, 1.3], rally: ['#8fe060', 50, 2.2],
     giant: ['#ffd34d', 80, 2.6], blood: ['#ff6a4a', 35, 1.6], hero: ['#ffffff', 30, 1.6], win: [null, 150, 3.2],
   };
+
+  // a ground ring (seen in the 3/4 view: flattened) stroked one art pixel wide
+  function ellipse(ctx, x, y, r, col, k) {
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, k);
+    ctx.beginPath(); ctx.ellipse(Math.round(x), Math.round(y), r, r * 0.6, 0, 0, Math.PI * 2); ctx.stroke();
+  }
 
   class Renderer {
     constructor(canvas) {
@@ -191,7 +201,7 @@
       const m = 60;
       const cx0 = vx0 - m, cy0 = vy0 - m, cx1 = vx1 + m, cy1 = vy1 + m * 1.6;
       const order = this.sortUnits(B);
-      WIN = B.winner;
+      WIN = B.winner; NOW = B.time;
       // marching step of every regiment (visual-only), advanced by the simulated time since last frame
       const dtB = B === this.stepB ? Math.max(0, B.time - this.stepT) : 0;
       this.stepB = B; this.stepT = B.time;
@@ -244,7 +254,7 @@
         ctx.drawImage(set.color[u.team], fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
         if (u.hitFlash > 0 && u.state === ALIVE && si <= 1) {
           // hit flash: white silhouette fading out over the normal sprite
-          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * (u.type === 'giant' ? 0.35 : 0.75); // a giant takes blows all the time
+          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * (u.type === 'giant' ? 0.35 : u.type === 'knight' ? 0.55 : 0.75); // big targets are hit all the time
           ctx.drawImage(set.flash, fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
           ctx.globalAlpha = 1;
         }
@@ -355,7 +365,7 @@
     }
 
     drawPings(ctx, B, D, ox, oy, n) {
-      const ev = B.events, now = B.time, S = TM.Sprites;
+      const ev = B.events, now = B.time;
       const k = D >= 0.999 ? n : 1;
       for (let i = ev.length - 1; i >= 0; i--) {
         const e = ev[i], age = now - e.time;
@@ -367,21 +377,17 @@
           const t = (age - w * 0.35) / P[2];
           if (t < 0 || t >= 1) continue;
           const e1 = 1 - (1 - t) * (1 - t);
-          const r = Math.max(3, Math.round(Math.min((8 + P[1] * e1) * D, 110 * e1 + 8) / k)); // close up a ping stays small
-          const cv = S.ring(Math.min(160, r & ~1), col);
+          const r = Math.max(3, Math.min((8 + P[1] * e1) * D, 110 * e1 + 8)); // close up a ping stays small
           ctx.globalAlpha = (1 - t) * (w ? 0.45 : 0.85);
-          const px = Math.round(e.x * D + ox), py = Math.round(e.y * D + oy);
-          ctx.drawImage(cv, px - Math.floor(cv.width / 2) * k, py - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
+          ellipse(ctx, e.x * D + ox, e.y * D + oy, r, col, k);
         }
       }
       // the event under the mouse in the feed: a steady marker
       const f = this.focusEvent;
       if (f && f.x != null) {
         const col = (PING[f.kind] && PING[f.kind][0]) || TM.TEAMS[f.team].light;
-        const r = Math.max(6, Math.round((24 + 6 * Math.sin(performance.now() / 160)) * D / k));
-        const cv = S.ring(Math.min(160, r & ~1), col);
         ctx.globalAlpha = 0.95;
-        ctx.drawImage(cv, Math.round(f.x * D + ox) - Math.floor(cv.width / 2) * k, Math.round(f.y * D + oy) - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
+        ellipse(ctx, f.x * D + ox, f.y * D + oy, Math.max(6, (24 + 6 * Math.sin(performance.now() / 160)) * D), col, k);
       }
       ctx.globalAlpha = 1;
     }
@@ -399,6 +405,15 @@
     // Position along the flight at parameter s (see Battle.updateArrows).
     drawArrowShadows(ctx, arrows, D, ox, oy, n, vx0, vy0, vx1, vy1) {
       if (!arrows.length) return;
+      if (D < 0.6) {
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        for (let i = 0; i < arrows.length; i++) {
+          const p = arrows[i];
+          if (p.x < vx0 || p.x > vx1 || p.y < vy0 || p.y > vy1) continue;
+          ctx.fillRect(Math.round(p.x * D + ox), Math.round(p.y * D + oy), 1, 1);
+        }
+        return;
+      }
       ctx.strokeStyle = 'rgba(0,0,0,0.22)';
       ctx.lineWidth = D < 0.999 ? 1 : n;
       ctx.beginPath();
@@ -492,6 +507,7 @@
         ctx.globalAlpha = (b + 0.6) / 4 * 0.55;
         for (let i = 0; i < cnt; i++) {
           if (type[i] !== 2) continue;
+          if (far && D < 0.6 && (i & 1)) continue;
           const k = life[i] / maxLife[i];
           if ((k * 4 | 0) !== b && !(b === 3 && k >= 1)) continue;
           const x = px[i], y = py[i];
@@ -509,13 +525,12 @@
     drawWaves(ctx, fx, D, ox, oy, n) {
       const list = fx.waves;
       if (!list.length || D < 0.3) return;
-      const S = TM.Sprites, k = D >= 0.999 ? n : 1;
+      const k = D >= 0.999 ? n : 1;
       for (let i = 0; i < list.length; i++) {
         const e = list[i], t = e.t / e.life;
-        const r = Math.max(3, Math.round(e.r * (0.35 + 0.9 * (1 - (1 - t) * (1 - t))) * D / k));
-        const cv = S.ring(Math.min(160, r & ~1), e.strong ? '#e9dcb8' : '#f4efe2');
+        const r = Math.max(3, e.r * (0.35 + 0.9 * (1 - (1 - t) * (1 - t))) * D);
         ctx.globalAlpha = (1 - t) * (e.strong ? 0.8 : 0.6);
-        ctx.drawImage(cv, Math.round(e.x * D + ox) - Math.floor(cv.width / 2) * k, Math.round(e.y * D + oy) - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
+        ellipse(ctx, e.x * D + ox, e.y * D + oy, r, e.strong ? '#e9dcb8' : '#f4efe2', k);
       }
       ctx.globalAlpha = 1;
     }

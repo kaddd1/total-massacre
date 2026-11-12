@@ -30,6 +30,7 @@
       kills: 0, dmg: 0, attackers: 0,
       mode: 0, engagedT: 0, chargeImmune: 0,
       stunT: 0, deathT: 0, deathRot: 0,
+      blockT: -9, // when a shield last caught an arrow (read by the renderer only)
       // regiment membership (set by TM.Tactics.build)
       reg: null, slot: 0, sdep: 0, slat: 0, rank: 0, contactT: -9, volleyAt: 0, volleyTarget: null,
     };

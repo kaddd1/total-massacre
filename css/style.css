@@ -292,6 +292,8 @@ kbd { background: #2b251f; border: 1px solid #4a4036; border-bottom-width: 2px; 
 .rchart-tip .lk { margin-right: 6px; }
 .mvp { background: rgba(255, 211, 77, 0.08); border: 1px solid rgba(255, 211, 77, 0.35); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; font-size: 14px; }
 .mvp b { color: var(--gold); }
+.mvp-go { margin-left: 8px; background: rgba(255, 211, 77, 0.12); color: var(--gold); border: 1px solid rgba(255, 211, 77, 0.45); border-radius: 5px; padding: 2px 9px; font-size: 12px; cursor: pointer; }
+.mvp-go:hover { background: rgba(255, 211, 77, 0.22); }
 .result-buttons { display: flex; gap: 8px; justify-content: center; }
 .result-buttons .btn { padding: 9px 18px; font-size: 14px; }
 .result-buttons .btn.primary { background: linear-gradient(#c8342b, #861b15); border-color: #ff6a5c; color: #fff; font-weight: 700; }
