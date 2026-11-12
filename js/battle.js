@@ -7,7 +7,7 @@
 
   function emptyStats() {
     const byType = {};
-    for (const k of TM.UNIT_ORDER) byType[k] = { deployed: 0, dead: 0, fled: 0, kills: 0, dmg: 0 };
+    for (const k of TM.ALL_TYPES) byType[k] = { deployed: 0, dead: 0, fled: 0, kills: 0, dmg: 0 };
     return { deployed: 0, alive: 0, dead: 0, fled: 0, fleeing: 0, kills: 0, teamkills: 0, byType };
   }
 
@@ -42,6 +42,7 @@
       this.lastCritText = -1;
       this.hitTick = 0;
       this.tickN = 0;
+      this.generals = [null, null];   // the commander unit of each army (null: none, or fallen)
       // hand-placed armies can stand anywhere (e.g. one above the other): see rebuild()
       this.freeMarch = setup.armies.some((a) => a.formation === 'manual');
 
@@ -50,9 +51,12 @@
       for (let t = 0; t < 2; t++) {
         const army = setup.armies[t];
         const spots = TM.Formations.spawn(t, army);
+        const gen = TM.GENERALS.some((g) => g.key && g.key === army.general) && spots.length ? army.general : '';
+        if (gen) spots.push(this.generalSpot(t, spots, setup.armies));
         for (const s of spots) {
           const u = TM.Units.create(id++, t, s.type, s.x, s.y);
           if (s.angle != null) u.facing = u.faceTo = s.angle; // regiments face where they were deployed
+          if (s.type === 'general') { u.genKind = gen; this.generals[t] = u; }
           this.units.push(u);
           this.stats[t].deployed++;
           this.stats[t].byType[s.type].deployed++;
@@ -70,6 +74,30 @@
       }
       this.rebuild();
       TM.Tactics.build(this, specs);
+    }
+
+    // The general takes the field behind the middle of his army, on the side away from the enemy.
+    generalSpot(t, spots, armies) {
+      const C = TM.CONFIG;
+      let x = 0, y = 0;
+      for (const s of spots) { x += s.x; y += s.y; }
+      x /= spots.length; y /= spots.length;
+      let bx = -TM.TEAMS[t].dir, by = 0;
+      const other = armies[1 - t];
+      if (other.formation === 'manual' && other.groups && other.groups.length) {
+        let ex = 0, ey = 0;
+        for (const g of other.groups) { ex += g.x; ey += g.y; }
+        ex /= other.groups.length; ey /= other.groups.length;
+        const l = Math.hypot(x - ex, y - ey) || 1;
+        bx = (x - ex) / l; by = (y - ey) / l;
+      }
+      let back = 0;
+      for (const s of spots) back = Math.max(back, (s.x - x) * bx + (s.y - y) * by);
+      return {
+        type: 'general', reg: 'general',
+        x: U.clamp(x + bx * (back + 40), 30, C.WORLD_W - 30), y: U.clamp(y + by * (back + 40), 30, C.WORLD_H - 30),
+        angle: Math.atan2(-by, -bx), doctrine: 'line',
+      };
     }
 
     start() {
@@ -211,7 +239,7 @@
       if (((this.tickN + u.id) & 3) === 0) breathe(u, this, sp, dt * 4);   // stamina: every 4th tick, staggered
       const w0 = u.walk;
       u.walk += sp * dt * 0.22;
-      if (sp > 12 && (d.charge || u.type === 'giant')) {
+      if (sp > 12 && (d.mounted || u.type === 'giant')) {
         // footfalls: hooves of galloping knights, stomps of giants
         const per = u.type === 'giant' ? 3.77 : Math.PI;
         if (((u.walk / per) | 0) !== ((w0 / per) | 0)) {
@@ -219,7 +247,7 @@
           if (u.type === 'giant') this.fx.stomp(u.x, u.y);
         }
       }
-      const turn = u.type === 'giant' ? 3 : u.type === 'knight' ? 5 : 9;
+      const turn = u.type === 'giant' ? 3 : d.mounted ? 5 : 9;
       u.facing = U.turnTo(u.facing, u.faceTo, turn * dt);
 
       // bounds (fleeing units may leave through the map edge)
@@ -273,8 +301,8 @@
           a.x -= nx * ov * wa; a.y -= ny * ov * wa;
           b.x += nx * ov * wb; b.y += ny * ov * wb;
           if (a.team !== b.team) {
-            if (a.type === 'knight') this.chargeImpact(a, b, nx, ny);
-            if (b.type === 'knight') this.chargeImpact(b, a, -nx, -ny);
+            if (a.def.charge) this.chargeImpact(a, b, nx, ny);
+            if (b.def.charge) this.chargeImpact(b, a, -nx, -ny);
           }
         }
       }
@@ -347,7 +375,8 @@
       if (!t || t.state !== ALIVE) return;
       const dx = t.x - u.x, dy = t.y - u.y, dist = Math.hypot(dx, dy) || 1;
       if (dist - u.r - t.r > d.reach + 5) return; // whiff
-      this.hit(u, t, U.range(d.dmgMin, d.dmgMax), 'melee', dx / dist, dy / dist, d.knock);
+      const mul = (1 + u.rage * 0.3) * (u.inspired ? 1.1 : 1);
+      this.hit(u, t, U.range(d.dmgMin, d.dmgMax) * mul, 'melee', dx / dist, dy / dist, d.knock);
     }
 
     // Universal damage application.
@@ -359,14 +388,15 @@
         if (bonus && kind !== 'brace') dmg *= bonus;
       }
       if (kind === 'arrow') {
-        if (v.def.block && !v.fleeing && U.rand() < v.def.block) {
+        const pierce = this.pierce;
+        if (v.def.block && !v.fleeing && U.rand() < v.def.block * (pierce ? 0.35 : 1)) {
           v.blockT = this.time;
           fx.sparks(v.x, v.y, v.z, 3);
           fx.impact(v.x, v.y, v.z, nx, ny, 'block');
           this.snd('block', v.x, v.y);
           return;
         }
-        dmg *= v.def.arrowMul;
+        dmg *= pierce ? 1 - (1 - v.def.arrowMul) * 0.35 : v.def.arrowMul;
       }
       else if (kind === 'melee' && v.def.armor) dmg *= v.def.armor;
       if (a && (kind === 'melee' || kind === 'charge')) {
@@ -382,6 +412,8 @@
       }
       v.hp -= dmg;
       v.hitFlash = 0.12;
+      if (v.def.rage && kind !== 'fall') v.rage = Math.min(1, v.rage + dmg / v.maxHp * 1.8);
+      if (a && a.def.rage && a.team !== v.team) a.rage = Math.min(1, a.rage + 0.12);
       // every blow that makes the monster bleed tells the men around it that it can be killed
       if (a && v.def.terror && a.team !== v.team && kind !== 'fall') a.morale = Math.min(100, a.morale + 1.5);
       if (TM.Audio && TM.Audio.live) this.hitSound(kind, v, dmg, crit);
@@ -425,6 +457,7 @@
       this.fx.blood(v.x, v.y, v.z, nx, ny, v.type === 'giant' ? 26 : 8, 1.3);
       this.snd(v.type === 'giant' ? 'giantdeath' : 'death', v.x, v.y);
       if (v.type === 'knight') this.snd('fall', v.x, v.y); // the horse goes down too
+      if (v.type === 'general') this.generalFalls(v, a);
       if (v.type === 'giant') {
         this.fx.shake(5);
         this.fx.dust(v.x, v.y, 14, 8);
@@ -466,6 +499,23 @@
       }
     }
 
+    // The army sees its commander go down: every man is shaken (most of all those close by), and
+    // whatever the general did for the army is gone; the enemy takes heart.
+    generalFalls(v, a) {
+      if (this.generals[v.team] === v) this.generals[v.team] = null;
+      const G = TM.GENERALS.find((g) => g.key === v.genKind);
+      this.event(`${TM.TEAMS[v.team].name}: ${G ? G.name.toLowerCase() : 'генерал'} пал!`, v.team, v.x, v.y, 'genfall', 'general');
+      this.snd('rout', v.x, v.y);
+      for (const o of this.alive[v.team]) {
+        if (o.state !== ALIVE || o === v || o.def.fearless) continue;
+        const dd = Math.hypot(o.x - v.x, o.y - v.y);
+        o.shock += 22 * (1 - Math.min(1, dd / 700) * 0.55);
+      }
+      for (const o of this.alive[1 - v.team]) {
+        if (o.state === ALIVE && Math.hypot(o.x - v.x, o.y - v.y) < 300) o.morale = Math.min(100, o.morale + 12);
+      }
+    }
+
     escape(u) {
       u.state = ESCAPED;
       const st = this.stats[u.team];
@@ -496,16 +546,16 @@
     }
 
     // ---------------- arrows ----------------
-    fireArrow(u, t, dist) {
+    fireArrow(u, t, dist, spreadMul) {
       const r = u.def.ranged;
       const T = dist / r.speed + 0.2;
       const lead = U.range(0.5, 1.0);
       let tx = t.x + t.vx * T * lead, ty = t.y + t.vy * T * lead;
-      const err = 4 + dist * r.spread;
+      const err = (4 + dist * r.spread) * (spreadMul || 1);
       tx += U.gauss() * err; ty += U.gauss() * err;
       this.snd('bow', u.x, u.y);
       this.arrows.push({
-        x0: u.x, y0: u.y, tx, ty, t: 0, T, h: 18 + dist * 0.2,
+        x0: u.x, y0: u.y, tx, ty, t: 0, T, h: (18 + dist * 0.2) * (r.arc || 1), pierce: !!r.pierce,
         x: u.x, y: u.y, z: 6, team: u.team, shooter: u,
         dmg: U.range(r.dmgMin, r.dmgMax),
       });
@@ -546,7 +596,9 @@
       }
       const dx = p.tx - p.x0, dy = p.ty - p.y0, l = Math.hypot(dx, dy) || 1;
       if (best && (best.team !== p.team || (this.opts.friendlyFire && U.rand() < 0.5))) {
-        this.hit(p.shooter, best, p.dmg, 'arrow', dx / l, dy / l, 25);
+        this.pierce = p.pierce;
+        this.hit(p.shooter, best, p.dmg, 'arrow', dx / l, dy / l, p.pierce ? 45 : 25);
+        this.pierce = false;
       } else if (p.tx > 0 && p.ty > 0 && p.tx < this.W && p.ty < this.H) {
         this.snd('arrowground', p.tx, p.ty);
         this.fx.stampArrow(p.tx, p.ty, Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.6);

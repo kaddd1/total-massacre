@@ -3,7 +3,7 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
-  const SHORT = { sword: 'Меч', spear: 'Коп', archer: 'Лук', knight: 'Рыц', giant: 'Вел' };
+  const SHORT = { sword: 'Меч', spear: 'Коп', berserk: 'Бер', archer: 'Лук', crossbow: 'Арб', knight: 'Рыц', horsearcher: 'КЛк', giant: 'Вел', general: 'Ген' };
   const CHART_COL = ['#e5544a', '#4a8fee'];
 
   const UI = {
@@ -63,6 +63,9 @@
       html += `<div class="section-label">Построение</div><div class="seg" id="form-${t}">`;
       for (const f of TM.FORMATIONS) html += `<button data-f="${f.key}" title="${f.desc}">${f.name}</button>`;
       html += `</div><div class="formation-desc" id="form-desc-${t}"></div>`;
+      html += `<div class="section-label">Полководец</div><div class="seg gen" id="gen-${t}">`;
+      for (const g of TM.GENERALS) html += `<button data-g="${g.key}" title="${g.desc}">${g.name}</button>`;
+      html += `</div><div class="formation-desc" id="gen-desc-${t}"></div>`;
       html += `<div class="panel-actions">
         <button data-act="random" title="Случайный состав">Случайно</button>
         <button data-act="clear" title="Убрать всех">Очистить</button>
@@ -96,6 +99,11 @@
         this.syncFromSetup();
         this.game.setupChanged();
       }));
+      el.querySelectorAll(`#gen-${t} button`).forEach((b) => b.addEventListener('click', () => {
+        this.game.setup.armies[t].general = b.dataset.g;
+        this.syncFromSetup();
+        this.game.setupChanged({ keepView: true });
+      }));
       el.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
         const army = this.game.setup.armies[t];
         if (b.dataset.act === 'random') Object.assign(army, UI.randomArmy());
@@ -105,6 +113,7 @@
           const other = this.game.setup.armies[1 - t];
           army.counts = Object.assign({}, other.counts);
           army.formation = other.formation;
+          army.general = other.general || '';
         }
         this.syncFromSetup();
         this.game.setupChanged();
@@ -113,17 +122,18 @@
 
     randomArmy() {
       const R = Math.random;
-      const lim = { sword: 220, spear: 160, archer: 160, knight: 50, giant: 5 };
+      const lim = { sword: 220, spear: 160, berserk: 140, archer: 160, crossbow: 120, knight: 50, horsearcher: 50, giant: 5 };
       const counts = {};
       let any = 0;
       for (const k of TM.UNIT_ORDER) {
-        const on = R() < (k === 'giant' ? 0.3 : 0.75);
+        const on = R() < (k === 'giant' ? 0.3 : k === 'berserk' || k === 'crossbow' || k === 'horsearcher' ? 0.4 : 0.7);
         counts[k] = on ? Math.round(lim[k] * (0.15 + R() * 0.85)) : 0;
         any += counts[k];
       }
       if (!any) counts.sword = 80;
       const auto = TM.FORMATIONS.filter((f) => f.key !== 'manual');
-      return { counts, formation: auto[(R() * auto.length) | 0].key };
+      const gens = TM.GENERALS.map((g) => g.key);
+      return { counts, formation: auto[(R() * auto.length) | 0].key, general: R() < 0.35 ? '' : gens[1 + ((R() * (gens.length - 1)) | 0)] };
     },
 
     syncFromSetup() {
@@ -139,6 +149,10 @@
         document.querySelectorAll(`#form-${t} button`).forEach((b) => b.classList.toggle('on', b.dataset.f === army.formation));
         const f = TM.FORMATIONS.find((x) => x.key === army.formation);
         $('form-desc-' + t).textContent = f ? f.desc : '';
+        const gk = army.general || '';
+        document.querySelectorAll(`#gen-${t} button`).forEach((b) => b.classList.toggle('on', b.dataset.g === gk));
+        const g = TM.GENERALS.find((x) => x.key === gk);
+        $('gen-desc-' + t).textContent = g ? g.desc : '';
       }
       $('opt-morale').checked = s.morale !== false;
       $('opt-ff').checked = s.friendlyFire !== false;
@@ -232,7 +246,7 @@
         $('hud-fled-' + t).textContent = s.fled;
         $('hud-panic-' + t).textContent = s.fleeing;
         let types = '';
-        for (const k of TM.UNIT_ORDER) {
+        for (const k of TM.ALL_TYPES) {
           const bt = s.byType[k];
           if (!bt.deployed) continue;
           types += `<span>${SHORT[k]} <i>${bt.deployed - bt.dead - bt.fled}</i></span>`;
@@ -272,7 +286,7 @@
         const el = $('hud-regs-' + t);
         el.innerHTML = '';
         if (!B.tac) continue;
-        const regs = B.tac.regs.filter((r) => r.team === t).sort((a, b) => TM.UNIT_ORDER.indexOf(a.type) - TM.UNIT_ORDER.indexOf(b.type) || a.id - b.id);
+        const regs = B.tac.regs.filter((r) => r.team === t).sort((a, b) => TM.ALL_TYPES.indexOf(a.type) - TM.ALL_TYPES.indexOf(b.type) || a.id - b.id);
         for (const R of regs) {
           const chip = document.createElement('span');
           chip.className = 'chip';
@@ -350,6 +364,7 @@
     // turning points of the battle get a title as well as a feed line
     bannerFor(ev, B) {
       if (ev.kind === 'win') this.banner('ПОБЕДА', TM.TEAMS[ev.team].full, 't' + ev.team);
+      else if (ev.kind === 'genfall' && !B.endTime) this.banner('ПОЛКОВОДЕЦ ПАЛ!', ev.text.replace(/^[^:]*: /, TM.TEAMS[ev.team].full + ': '), 'warn');
       else if (ev.kind === 'break' && !B.endTime) this.banner(`${TM.TEAMS[ev.team].name.toUpperCase()} ДРОГНУЛИ!`, 'армия бежит с поля', 'warn');
     },
 
@@ -414,7 +429,7 @@
         const left = bt.deployed - bt.dead - bt.fled;
         return `<td>${bt.deployed} <span class="dim">→</span> ${left}</td><td>${bt.kills}</td>`;
       };
-      for (const k of TM.UNIT_ORDER) {
+      for (const k of TM.ALL_TYPES) {
         if (!s0.byType[k].deployed && !s1.byType[k].deployed) continue;
         rows += `<tr><td>${TM.UNIT_TYPES[k].name}</td>${cell(s0, k)}${cell(s1, k)}</tr>`;
       }

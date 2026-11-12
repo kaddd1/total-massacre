@@ -4,7 +4,9 @@
   'use strict';
   const U = TM.U;
 
-  const GAP = { sword: 4, spear: 4, archer: 5, knight: 7, giant: 14 };
+  const GAP = { sword: 4, spear: 4, berserk: 5, archer: 5, crossbow: 4, knight: 7, horsearcher: 8, giant: 14, general: 8 };
+  const FOOT = ['giant', 'berserk', 'spear', 'sword', 'crossbow', 'archer'];   // front to back
+  const HORSE = ['knight', 'horsearcher'];
 
   function spacing(key) {
     return TM.UNIT_TYPES[key].radius * 2 + GAP[key];
@@ -42,44 +44,49 @@
     return depth;
   }
 
-  function sumExcept(counts, skip) {
+  function footCount(counts) {
     let n = 0;
-    for (const k of TM.UNIT_ORDER) if (k !== skip) n += counts[k] | 0;
+    for (const k of FOOT) n += counts[k] | 0;
     return n;
   }
 
+  // horse on the wings: knights next to the line, light horse farther out
   function flanks(counts, mainWidth, out) {
-    const nk = counts.knight | 0;
-    if (!nk) return;
-    const D = spacing('knight');
-    const perRow = 4;
-    const blockW = (perRow - 1) * D;
-    const left = Math.ceil(nk / 2), right = nk - left;
-    const off = mainWidth / 2 + 46 + blockW / 2;
-    ranks(['knight'], { knight: left }, () => blockW, out, 0, -off);
-    if (right) ranks(['knight'], { knight: right }, () => blockW, out, 0, off);
+    let off = mainWidth / 2 + 46;
+    for (const key of HORSE) {
+      const nk = counts[key] | 0;
+      if (!nk) continue;
+      const D = spacing(key);
+      const blockW = 3 * D;
+      const left = Math.ceil(nk / 2), right = nk - left;
+      off += blockW / 2;
+      ranks([key], { [key]: left }, () => blockW, out, 0, -off);
+      if (right) ranks([key], { [key]: right }, () => blockW, out, 0, off);
+      off += blockW / 2 + 40;
+    }
   }
 
   const LAYOUTS = {
     line(counts, out) {
-      const main = sumExcept(counts, 'knight');
-      if (!main) return ranks(['knight'], counts, () => U.clamp(Math.sqrt(counts.knight) * 50, 60, 900), out);
+      const main = footCount(counts);
+      if (!main) return ranks(HORSE, counts, () => U.clamp(Math.sqrt((counts.knight | 0) + (counts.horsearcher | 0)) * 50, 60, 900), out);
       const W = U.clamp(Math.sqrt(main) * 42, 140, 1150);
-      ranks(['giant', 'spear', 'sword', 'archer'], counts, () => W, out);
+      ranks(FOOT, counts, () => W, out);
       flanks(counts, W, out);
     },
     block(counts, out) {
-      const main = sumExcept(counts, 'knight');
-      if (!main) return ranks(['knight'], counts, () => U.clamp(Math.sqrt(counts.knight) * 22, 40, 600), out);
+      const main = footCount(counts);
+      if (!main) return ranks(HORSE, counts, () => U.clamp(Math.sqrt((counts.knight | 0) + (counts.horsearcher | 0)) * 22, 40, 600), out);
       const W = U.clamp(Math.sqrt(main) * 16, 60, 720);
-      ranks(['giant', 'spear', 'sword', 'archer'], counts, () => W, out);
+      ranks(FOOT, counts, () => W, out);
       flanks(counts, W, out);
     },
     wedge(counts, out) {
-      ranks(['giant', 'knight', 'sword', 'spear', 'archer'], counts, (row) => Math.min(1200, 10 + row * 30), out);
+      ranks(['giant', 'knight', 'berserk', 'sword', 'spear', 'crossbow', 'archer', 'horsearcher'], counts, (row) => Math.min(1200, 10 + row * 30), out);
     },
     horde(counts, out) {
-      const total = sumExcept(counts, null);
+      let total = 0;
+      for (const k of TM.UNIT_ORDER) total += counts[k] | 0;
       const R = Math.sqrt(total) * 13 + 30;
       for (const key of TM.UNIT_ORDER) {
         const n = counts[key] | 0;
@@ -87,8 +94,8 @@
           const a = U.rand() * Math.PI * 2;
           const rr = Math.sqrt(U.rand());
           let d = R * 0.75 + Math.cos(a) * rr * R * 0.75;
-          if (key === 'archer') d += R * 0.35;
-          if (key === 'giant' || key === 'knight') d *= 0.6;
+          if (key === 'archer' || key === 'crossbow') d += R * 0.35;
+          if (key === 'giant' || key === 'knight' || key === 'horsearcher') d *= 0.6;
           out.push({ type: key, blk: 100 + TM.UNIT_ORDER.indexOf(key), d, l: Math.sin(a) * rr * R * 1.35 });
         }
       }

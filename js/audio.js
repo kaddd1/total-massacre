@@ -446,7 +446,7 @@
             const dx = (u.x - lx) / R, dy = (u.y - ly) / R, w = 1 / (1 + 2.25 * (dx * dx + dy * dy));
             alive += w;
             if (u.fleeing) { flee += w; fx += w * u.x; }
-            else if (u.type === 'knight' && u.moveAmt > 0.55) { gal += w; gx += w * u.x; }
+            else if (u.def.mounted && u.moveAmt > 0.55) { gal += w; gx += w * u.x; }
             else if (!u.target && u.moveAmt > 0.3) { march += w * (u.type === 'giant' ? 3 : 1); mx += w * u.x; }
           }
         }

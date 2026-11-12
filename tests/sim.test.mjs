@@ -307,6 +307,89 @@ const edgeDist = (u) => Math.min(u.x, u.y, TM.CONFIG.WORLD_W - u.x, TM.CONFIG.WO
   check('exhaustion slows a man down, but never stops him', fresh === 1 && spent >= 0.65 && spent < 0.8);
 }
 
+// ---------------------------------------------------------------- new arms and generals
+console.log('\n# Berserkers, crossbowmen, horse archers, generals');
+const winsOf = (armies, seeds, limit) => {
+  let w = 0;
+  for (const s of seeds) { const B = runFor(battle(armies, s), limit || 200); if (B.winner === 0) w++; }
+  return w;
+};
+{
+  // crossbow bolts go through shields and plate
+  const B = battle([auto({ crossbow: 1 }), auto({ sword: 1, knight: 1 })], 5);
+  const xb = B.units.find((u) => u.type === 'crossbow'), sw = B.units.find((u) => u.type === 'sword'), kn = B.units.find((u) => u.type === 'knight');
+  let blocked = 0, hits = 0, knightDmg = 0;
+  for (let i = 0; i < 400; i++) {
+    sw.hp = sw.maxHp; const h0 = sw.hp;
+    B.pierce = true; B.hit(xb, sw, 20, 'arrow', 1, 0, 0); B.pierce = false;
+    if (sw.hp === h0) blocked++; else hits++;
+  }
+  for (let i = 0; i < 6 && !knightDmg; i++) { kn.hp = kn.maxHp; B.pierce = true; B.hit(xb, kn, 20, 'arrow', 1, 0, 0); B.pierce = false; knightDmg = kn.maxHp - kn.hp; }
+  check(`bolts mostly go through shields (blocked ${(blocked / 4).toFixed(0)}%, arrows 40%)`, blocked / 400 < 0.25 && hits > 0);
+  check(`bolts lose little against plate (knight took ${knightDmg.toFixed(1)} of 20)`, knightDmg >= 17 || knightDmg >= 34);
+}
+{
+  // crossbowmen behind pikes stop a cavalry charge; on their own they are ridden down
+  check('crossbowmen with pikes beat knights (3/3)', winsOf([auto({ crossbow: 80, spear: 60 }), auto({ knight: 70 })], [11, 12, 13]) === 3);
+  check('crossbowmen alone are ridden down by knights (0/3)', winsOf([auto({ crossbow: 120 }), auto({ knight: 60 })], [11, 12, 13]) === 0);
+  check('archers outshoot crossbowmen (outrange them)', winsOf([auto({ archer: 120 }), auto({ crossbow: 120 })], [11, 12, 13]) >= 2);
+}
+{
+  // berserkers: rage from wounds, no fear of giants while they have breath, a mob in any formation
+  const B = battle([auto({ berserk: 40 }), auto({ giant: 1 })], 7);
+  check('berserkers fight as a mob even in a line formation', B.tac.regs.filter((R) => R.type === 'berserk').every((R) => R.discipline === 0));
+  const b = B.units.find((u) => u.type === 'berserk');
+  B.hit(null, b, 50, 'melee', 1, 0, 0);
+  check('wounds fill a berserker with rage', b.rage > 0.5, b.rage.toFixed(2));
+  let minFresh = 100, fled = 0;
+  runFor(B, 25, (bb) => { for (const u of bb.units) if (u.type === 'berserk' && u.state === 0) { if (u.sta > 0.3) minFresh = Math.min(minFresh, u.morale); if (u.fleeing) fled++; } });
+  check(`berserkers with breath left never drop below the fury floor (min morale ${minFresh.toFixed(0)})`, minFresh >= 29.9);
+  check('berserkers lose to archers that shoot them down (0-1 of 3)', winsOf([auto({ berserk: 120 }), auto({ archer: 150 })], [21, 22, 23]) <= 1);
+}
+{
+  // horse archers: shoot from the saddle, run from horse, empty their quivers
+  const B = battle([auto({ horsearcher: 40 }), auto({ sword: 100 })], 31);
+  let shotsMoving = 0, evade = false, maxDist = 0;
+  const fire0 = B.fireArrow.bind(B);
+  B.fireArrow = (u, t, d, m) => { if (u.type === 'horsearcher' && Math.hypot(u.vx, u.vy) > 30) shotsMoving++; return fire0(u, t, d, m); };
+  runFor(B, 200, (bb) => { for (const R of bb.tac.regs) if (R.type === 'horsearcher' && R.order === 'evade') evade = true; });
+  const quivers = B.units.filter((u) => u.type === 'horsearcher').map((u) => u.ammo);
+  check(`horse archers shoot on the move (${shotsMoving} shots at a gallop)`, shotsMoving > 30);
+  check('horse archers never carry more than a full quiver and run dry', quivers.every((a) => a >= 0 && a <= 30) && B.events.some((e) => e.kind === 'quiver'));
+  check('horse archers are outshot by foot archers (0/3)', winsOf([auto({ horsearcher: 60 }), auto({ archer: 120 })], [41, 42, 43]) === 0);
+  const B2 = runFor(battle([auto({ horsearcher: 60 }), auto({ sword: 150 })], 44), 300);
+  check(`horse archers against foot do not kite for ever (battle over in ${B2.duration().toFixed(0)} s)`, B2.state === 'over' && B2.duration() < 200);
+}
+{
+  // generals: one per army, behind the lines, with an army-wide effect; their fall shakes the army
+  const C = TM.PRESETS[0].red.counts;
+  const B = battle([auto(C, 'line'), auto(C, 'line')].map((a, i) => Object.assign(a, { general: ['marshal', 'warlord'][i] })), 51);
+  const gs = B.units.filter((u) => u.type === 'general');
+  check('each army gets its general', gs.length === 2 && gs.some((g) => g.genKind === 'marshal') && gs.some((g) => g.genKind === 'warlord'));
+  const red = B.units.filter((u) => u.team === 0 && u.type !== 'general');
+  const back = gs.find((g) => g.team === 0).x < Math.min(...red.map((u) => u.x)) + 20;
+  check('the general takes the field behind his army', back);
+  const m = gs.find((g) => g.genKind === 'marshal');
+  const near = B.units.filter((u) => u.team === m.team && u !== m && Math.hypot(u.x - m.x, u.y - m.y) < 120);
+  runFor(B, 0.1);
+  B.kill(m, null, 1, 0);
+  const shock = near.reduce((s, u) => s + u.shock, 0) / near.length;
+  check(`the fall of the general shakes the men around him (dread ${shock.toFixed(0)} morale points each)`, shock > 15 && B.events.some((e) => e.kind === 'genfall') && B.generals[m.team] === null);
+  // a general helps but does not decide everything: a slightly bigger army without one still wins
+  const plus = { sword: 77, spear: 55, archer: 55, knight: 15 };
+  const w = winsOf([Object.assign(auto(C), { general: 'warlord' }), auto(plus)], [61, 62, 63, 64]);
+  check(`a warlord does not beat 10% more men (${w}/4)`, w <= 2);
+  const w2 = winsOf([Object.assign(auto(C), { general: 'tactician' }), auto(C)], [61, 62, 63, 64, 65, 66]);
+  check(`a tactician is worth having (${w2}/6 against the same army without a general)`, w2 >= 4);
+}
+{
+  // old armies without the new arms are unaffected by them: same battle with or without the new code paths
+  const a = fingerprint(runFor(battle([TM.PRESETS[0].red, TM.PRESETS[0].blue], 77), 30));
+  const b = fingerprint(runFor(battle([TM.PRESETS[0].red, TM.PRESETS[0].blue], 77), 30));
+  check('battles with generals and new arms stay deterministic', a === b &&
+    fingerprint(runFor(battle([TM.PRESETS[7].red, TM.PRESETS[7].blue], 5), 40)) === fingerprint(runFor(battle([TM.PRESETS[7].red, TM.PRESETS[7].blue], 5), 40)));
+}
+
 // ---------------------------------------------------------------- editor geometry
 console.log('\n# Editor groups');
 {

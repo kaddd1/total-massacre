@@ -10,7 +10,7 @@
   'use strict';
   const C = TM.CONFIG;
   const $ = (id) => document.getElementById(id);
-  const SHORT = { sword: 'Меч', spear: 'Коп', archer: 'Лук', knight: 'Рыц', giant: 'Вел' };
+  const SHORT = { sword: 'Меч', spear: 'Коп', berserk: 'Бер', archer: 'Лук', crossbow: 'Арб', knight: 'Рыц', horsearcher: 'КЛк', giant: 'Вел', general: 'Ген' };
 
   function strHash(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
   function hash(a, b) {

@@ -179,7 +179,7 @@
         if (Rg.sta < 0.35 && Rg.role !== 'monster') {
           for (const u of Rg.members) {
             if (u.state !== 0 || u.sta > 0.25 || R() > dt * 0.7) continue;
-            const hh = u.type === 'knight' ? 15 : 12;
+            const hh = u.def.mounted ? 15 : 12;
             this.spawn(P_BREATH, u.x + Math.cos(u.facing) * 3, u.y + Math.sin(u.facing) * 2, hh, Math.cos(u.facing) * 8, Math.sin(u.facing) * 5, 7, 0.5, 1);
           }
         }

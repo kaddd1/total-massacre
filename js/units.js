@@ -10,6 +10,16 @@
   const TERROR_R = 95;     // a giant frightens the men within this distance (more the closer it is)
   const buf = [];
 
+  // ---------------- the general's presence ----------------
+  // Radius of each archetype's influence and what it does to the men inside it (see think()).
+  const AURA = { marshal: 210, warlord: 110, tactician: 200 };
+  function generalNear(u, B) {
+    const g = B.generals && B.generals[u.team];
+    if (!g || g === u || g.state !== ALIVE) return null;
+    const dx = g.x - u.x, dy = g.y - u.y, r = AURA[g.genKind];
+    return dx * dx + dy * dy < r * r ? g.genKind : null;
+  }
+
   // ---------------- stamina ----------------
   // 1 = fresh, 0 = spent. Running flat out (faster than a formation's marching pace), fleeing and
   // every blow cost breath; walking and standing give it back, slowly while the enemy is close.
@@ -23,7 +33,7 @@
     let s = sp / top;
     // in his place in the ranks a man goes at the pace of his regiment: the small corrections that
     // keep the ranks dressed are not a run
-    if (s > 0.6 && R && !u.fleeing && R.role !== 'cavalry') {
+    if (s > 0.6 && R && !u.fleeing && !d.mounted) {
       const dx = u.x - (R.ax + R.cos * u.sdep - R.sin * u.slat), dy = u.y - (R.ay + R.sin * u.sdep + R.cos * u.slat);
       if (dx * dx + dy * dy < 144) { const rs = Math.sqrt(R.vx * R.vx + R.vy * R.vy) / top; if (rs < s) s = rs; }
     }
@@ -69,6 +79,10 @@
       sta: 1,                  // stamina (see breathe)
       shock: 0, seen: 0,       // fright from comrades dying around, still to sink in; deaths witnessed
       facedT: 0,               // seconds spent face to face with a terror (one gets used even to giants)
+      rage: 0,                 // berserkers: fury from wounds and kills (0..1)
+      inspired: false,         // fighting next to a warlord
+      genKind: '',             // generals: archetype
+      ammo: d.ranged && d.ranged.ammo ? d.ranged.ammo : Infinity,   // a horse archer's quiver
     };
   }
 
@@ -82,6 +96,7 @@
     const leash = TM.Tactics.leash(u);
     const sx = R.slotX(u), sy = R.slotY(u);
     const sense = Math.max(MORALE_R, leash + d.reach + 40);
+    const shooter = d.ranged && !R.spent;   // horse archers out of arrows look for a fight like any rider
     const n = B.grid.query(u.x, u.y, sense, buf);
     let best = null, bestScore = 1e9;
     let allies = 0, enemies = 0, fleeingAllies = 0, terror = 0;
@@ -99,14 +114,14 @@
       }
       if (d2 > s2) continue;
       if (d2 < m2) {
-        enemies += o.fleeing ? 0.3 : (o.def.fearless ? 4 : o.type === 'knight' ? 2 : 1);
+        enemies += o.fleeing ? 0.3 : (o.def.fearless ? 4 : o.def.mounted ? 2 : 1);
         ex += o.x; ey += o.y; ec++;
       }
       if (o.def.terror && d2 < TERROR_R * TERROR_R) {
         terror += o.def.terror * (1 - Math.sqrt(d2) / TERROR_R * 0.6) * (0.35 + 0.65 * o.hp / o.maxHp);
       }
       if (d2 < nearD2) { nearD2 = d2; near = o; }
-      if (u.fleeing || d.ranged) continue; // archers shoot on the regiment's command; daggers use nearEnemy
+      if (u.fleeing || shooter) continue; // archers shoot on the regiment's command; daggers use nearEnemy
       const lim = leash + d.reach + u.r + o.r + 4;
       const ox = o.x - sx, oy = o.y - sy;
       if (ox * ox + oy * oy > lim * lim) continue;
@@ -120,16 +135,30 @@
     u.nearEnemy = near;
     u.nearEnemyD = near ? Math.sqrt(nearD2) : 1e9;
 
+    const aura = generalNear(u, B);
+    u.inspired = aura === 'warlord';
+    if (d.rage) {
+      // fury: fed by wounds and blows (battle.js), fading when there is nobody to fight; a badly
+      // wounded berserker is always in a rage
+      u.rage = Math.max(u.rage * Math.exp(-el / (best ? 8 : 3)), 1 - u.hp / u.maxHp);
+    }
+
     // ----- morale -----
     if (B.opts.morale && !d.fearless) {
       let dm = 0;
+      if (aura === 'marshal') { dm += u.fleeing ? 10 : 3; terror *= 0.5; }
+      else if (aura === 'warlord') dm += u.fleeing ? 5 : 1.5;
+      else if (aura === 'tactician') dm += u.fleeing ? 3 : 0.8;
+      // berserkers fear nothing while they still have breath to fight
+      const furious = d.rage && u.sta > 0.25 && R.n >= 4 && allies >= 2;   // the frenzy of a pack, not of a lone man
+      if (furious) terror = 0;
       // the death of comrades sinks in over a few seconds instead of all at once: a massacre around
       // a man wears him down steadily (at most ~5 points a second) rather than in one blow. Nothing is
       // forgotten, it only takes time, and in that time the men can still turn the fight (a fallen
       // giant lifts the dread, battle.js)
       if (u.shock > 0.01) {
         const take = Math.min(u.shock, 5 * el + 0.4);
-        u.morale -= take; u.shock -= take;
+        u.morale -= aura === 'marshal' ? take * 0.5 : take; u.shock -= take;
       }
       const lossR = B.lossRatio(u.team);
       if (enemies === 0) dm += u.fleeing ? (lossR > 0.6 ? 1 : 3) : 6;
@@ -155,7 +184,7 @@
       }
       // a man out of breath takes heart more slowly
       dm *= dm < 0 ? 1 / u.bravery : u.bravery * (0.6 + 0.4 * tiredness(u));
-      u.morale = U.clamp(u.morale + dm * el, 0, 100);
+      u.morale = U.clamp(u.morale + dm * el, furious ? 30 : 0, 100);
 
       if (!u.fleeing && u.morale < 14) {
         u.fleeing = true;
@@ -185,7 +214,7 @@
     }
 
     // ----- targeting -----
-    if (d.ranged) {
+    if (shooter) {
       // a cornered archer draws his dagger; otherwise he aims where his regiment shoots
       const nd = near ? Math.sqrt(nearD2) - u.r - near.r : 1e9;
       u.target = near && (nd < d.reach + 3 || (R.order === 'stand' && nd < 22)) ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
@@ -218,7 +247,7 @@
     u.desX = 0; u.desY = 0;
     if (u.z > 0.5 || u.stunT > 0) return;
 
-    const speed = d.speed * u.speedMul * speedK(u);
+    const speed = d.speed * u.speedMul * speedK(u) * (1 + u.rage * 0.1);
 
     if (u.fleeing) {
       u.desX = u.fleeX * speed * 1.1;
@@ -237,6 +266,7 @@
       if (u.z <= 0 && u.type !== 'giant' && U.rand() < dt * 0.8) u.vz = 70 + U.rand() * 50;
       return;
     }
+    if (R.role === 'skirmisher' && !R.spent) return skirmisher(u, B, R, t, speed);
     if (d.ranged) return archer(u, B, R, t, speed);
 
     const sx = R.slotX(u), sy = R.slotY(u);
@@ -246,7 +276,16 @@
       const ox = t.x - sx, oy = t.y - sy;
       if (ox * ox + oy * oy > lim * lim) t = u.target = null;
     }
-    if (R.role === 'cavalry' && R.order !== 'melee' && R.order !== 'hold') {
+    if (R.role === 'general' && R.order !== 'lead') {
+      // the general rides where he is needed and only strikes whoever gets in his way
+      ride(u, R, sx, sy, speed);
+      if (t) {
+        const gap = Math.hypot(t.x - u.x, t.y - u.y) - u.r - t.r;
+        if (gap <= d.reach) { u.contactT = B.time; if (u.atkCd <= 0 && u.atkT < 0) startAttack(u, t, gap); }
+      }
+      return;
+    }
+    if ((R.role === 'cavalry' || R.role === 'skirmisher') && R.order !== 'melee' && R.order !== 'hold') {
       // riding in formation; strike whoever comes within reach on the way
       ride(u, R, sx, sy, speed);
       if (t) {
@@ -313,6 +352,31 @@
     }
   }
 
+  // Horse archers ride with their regiment and shoot at will from the saddle, less accurately on
+  // the move; caught at close quarters they cut their way out.
+  function skirmisher(u, B, R, t, speed) {
+    const d = u.def, r = d.ranged;
+    const ne = u.nearEnemy;
+    const neD = ne && ne.state === ALIVE ? Math.hypot(ne.x - u.x, ne.y - u.y) - u.r - ne.r : 1e9;
+    if (R.order === 'melee' && t && t.state === ALIVE) return melee(u, B, t, speed, 0);
+    ride(u, R, R.slotX(u), R.slotY(u), speed);
+    if (neD <= d.reach + 1) {
+      u.contactT = B.time;
+      if (u.atkCd <= 0 && u.atkT < 0) startAttack(u, ne, neD);
+      return;
+    }
+    if (u.rangedCd > 0 || u.atkT >= 0 || u.ammo <= 0) return;
+    let T = R.aim && R.aim.state === ALIVE ? R.aim : null;
+    let dist = T ? Math.hypot(T.x - u.x, T.y - u.y) : 1e9;
+    if (dist > r.range && ne && ne.state === ALIVE && u.nearEnemyD <= r.range) { T = ne; dist = u.nearEnemyD; }
+    if (!T || dist > r.range || !TM.Tactics.clearShot(B, T, u.team)) return;
+    const moving = Math.hypot(u.vx, u.vy) > d.speed * 0.4;
+    B.fireArrow(u, T, dist, moving ? 1.4 : 1);
+    u.ammo--;
+    u.rangedCd = r.cooldown * U.range(0.9, 1.15);
+    u.shotT = 0;
+  }
+
   function archer(u, B, R, t, speed) {
     const d = u.def, r = d.ranged;
     const ne = u.nearEnemy;
@@ -352,7 +416,8 @@
     u.atkT = 0;
     u.atkDone = false;
     u.atkTarget = t;
-    u.atkCd = d.cooldown * U.range(0.85, 1.2) * (1 + 0.35 * (1 - tiredness(u)));  // tired arms strike slower
+    u.atkCd = d.cooldown * U.range(0.85, 1.2) * (1 + 0.35 * (1 - tiredness(u)))  // tired arms strike slower
+      * (1 - 0.25 * u.rage) * (u.inspired ? 0.95 : 1);
     u.sta = Math.max(0, u.sta - 0.02 / d.endurance);
     // enemy got inside the spear's reach: clumsy
     if (u.type === 'spear' && gap < d.reach * 0.3) u.atkCd *= 1.3;

@@ -19,6 +19,7 @@
           for (const k of TM.UNIT_ORDER) a.counts[k] = Math.min(TM.UNIT_TYPES[k].max, a.counts[k] | 0);
           TM.Groups.sanitize(a);
           if (!TM.FORMATIONS.some((f) => f.key === a.formation)) a.formation = 'line';
+          if (!TM.GENERALS.some((g) => g.key === a.general)) a.general = '';
         }
         return s;
       }

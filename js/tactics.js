@@ -16,9 +16,12 @@
   const U = TM.U;
   const ALIVE = 0;
   const THINK = 0.2;                         // regiment decision period, s
-  const NAME = { sword: 'мечники', spear: 'копейщики', archer: 'лучники', knight: 'рыцари', giant: 'великаны' };
-  const REG_W = { sword: 240, spear: 240, archer: 280, knight: 140, giant: 260 }; // target frontage of a regiment
-  const MIN_REG = { sword: 12, spear: 12, archer: 12, knight: 5, giant: 1 };      // smallest regiment when splitting
+  const NAME = { sword: 'мечники', spear: 'копейщики', archer: 'лучники', knight: 'рыцари', giant: 'великаны',
+    berserk: 'берсерки', crossbow: 'арбалетчики', horsearcher: 'конные лучники', general: 'генерал' };
+  // target frontage of a regiment, and the smallest regiment when splitting
+  const REG_W = { sword: 240, spear: 240, berserk: 240, archer: 280, crossbow: 280, knight: 140, horsearcher: 160, giant: 260 };
+  const MIN_REG = { sword: 12, spear: 12, berserk: 12, archer: 12, crossbow: 12, knight: 5, horsearcher: 6, giant: 1 };
+  const ROLE = { archer: 'missile', crossbow: 'missile', knight: 'cavalry', horsearcher: 'skirmisher', giant: 'monster', general: 'general' };
   const HORDE_REG = 40;                      // men per regiment in a horde
 
   // ---------------------------------------------------------------- partition of a deployment
@@ -51,8 +54,8 @@
       this.id = id; this.team = team; this.type = type; this.def = TM.UNIT_TYPES[type];
       this.name = NAME[type];
       this.doctrine = doctrine;                       // line | spearhead | horde
-      this.discipline = doctrine === 'horde' ? 0 : 1;
-      this.role = type === 'archer' ? 'missile' : type === 'knight' ? 'cavalry' : type === 'giant' ? 'monster' : 'front';
+      this.discipline = doctrine === 'horde' || TM.UNIT_TYPES[type].wild ? 0 : 1;
+      this.role = ROLE[type] || 'front';
       this.members = members; this.n0 = members.length;
       this.spacing = TM.Formations.spacing(type);
       let ax = 0, ay = 0;
@@ -71,7 +74,7 @@
       this.prio = this.slots.map((_, i) => i).sort((a, b) => this.slots[a].rank - this.slots[b].rank || Math.abs(this.slots[a].lat) - Math.abs(this.slots[b].lat) || a - b);
       members.forEach((u, i) => { u.reg = this; this.setSlot(u, i); });
       // speeds
-      this.maxSpeed = this.def.speed * (this.role === 'cavalry' ? 1 : this.role === 'monster' ? 0.9 : 0.82);
+      this.maxSpeed = this.def.speed * (this.def.mounted ? 1 : this.role === 'monster' ? 0.9 : 0.82);
       this.speed = 0;
       this.goalX = this.ax; this.goalY = this.ay; this.goalAngle = angle;
       // state
@@ -84,6 +87,7 @@
       this.lx = 1; this.ly = 0; this.lanceT = 3; this.committed = false; this.shockT = -99;
       this.compactCount = -1; this.supportOf = null; this.supOff = null;
       this.sta = 1; this.winded = false;              // mean stamina of the men in the ranks; out of breath
+      this.spent = false;                             // horse archers with empty quivers
       this.chaseE = null; this.chaseGap = 0; this.chaseT = 0; this.shunE = null; this.shunUntil = 0;
     }
 
@@ -227,6 +231,9 @@
     return best;
   }
 
+  // archetype of the army's living general ('' if none)
+  const T_KIND = (B, R) => B.tac.gen[R.team].kind || '';
+
   // ---------------------------------------------------------------- army command
   function general(B, t) {
     const T = B.tac, G = T.gen[t];
@@ -253,7 +260,19 @@
     const shoot = (s) => T.regs.reduce((a, r) => a + (r.team === s && r.active() && r.role === 'missile' ? r.n : 0), 0);
     const melee = (s) => T.regs.reduce((a, r) => a + (r.team === s && r.active() && r.role !== 'missile' ? r.n : 0), 0);
     const myS = shoot(t), enS = shoot(1 - t);
-    const wantDefend = myS >= 20 && myS > 1.6 * enS && melee(1 - t) > 0;
+    const gen = B.generals[t];
+    G.kind = gen && gen.state === ALIVE ? gen.genKind : '';
+    // a warlord never waits for the enemy to come
+    const wantDefend = G.kind !== 'warlord' && myS >= 20 && myS > 1.6 * enS && melee(1 - t) > 0;
+    // the tactician names one enemy regiment for all the bows: the one that is hurting us most
+    G.focus = null;
+    if (G.kind === 'tactician') {
+      let fs = Infinity;
+      for (const E of foes) {
+        const s = dist(E.cx, E.cy, G.cx, G.cy) - E.engaged * 260 - (E.role === 'cavalry' || E.role === 'monster' ? 120 : 0);
+        if (s < fs) { fs = s; G.focus = E; }
+      }
+    }
     if (G.stance === 'defend') {
       // give up waiting if the enemy waits too (or nothing comes)
       G.standT += THINK;
@@ -297,7 +316,7 @@
       // foot can't catch horse: cavalry is a target only when it is stuck in a fight close by
       // (pikes brace against a charge instead, see thinkFront). Chasing it pulls the wings of the
       // battle line off to the edges of the field.
-      if (E.role === 'cavalry' && !(E.engaged > 0.25 && d < 120)) s += R.type === 'spear' ? 320 : 400;
+      if (E.def.mounted && !(E.engaged > 0.25 && d < 120)) s += R.type === 'spear' ? 320 : 400;
       if (R.doctrine === 'spearhead') s += dist(E.cx, E.cy, T.gen[R.team].ecx, T.gen[R.team].ecy) * 0.8; // drive into the centre
       if (E === R.shunE && B.time < R.shunUntil) s += 450;   // a chase that led nowhere
       return s;
@@ -310,7 +329,9 @@
     // reserves follow their front regiment until it needs help
     if (R.role === 'support') {
       const F = R.supportOf;
-      const needed = !F || !F.active() || F.strength < 0.6 || F.engagedT > 10 || (F.engaged > 0.2 && R.orderT > 25);
+      // a tactician sends the reserve in as soon as the first line starts to give
+      const tac = G.kind === 'tactician';
+      const needed = !F || !F.active() || F.strength < (tac ? 0.7 : 0.6) || F.engagedT > (tac ? 7 : 10) || (F.engaged > 0.2 && R.orderT > (tac ? 18 : 25));
       if (!needed) {
         R.setOrder('support');
         const ox = R.supOff.x, oy = R.supOff.y;
@@ -340,7 +361,7 @@
       }
     }
     const horde = R.discipline === 0, monster = R.role === 'monster';
-    const chargeAt = horde ? 130 : monster ? 120 : 70;
+    const chargeAt = (horde ? 130 : monster ? 120 : 70) + (G.kind === 'warlord' ? 25 : 0);
     // pursuit: an enemy that keeps out of reach for long (archers skirmishing back) is left alone for
     // a while if there is anything else to fight; with nothing else, the chase goes on
     if (R.engaged < 0.1 && R.pOrder !== 'hold' && R.pOrder !== 'brace' && R.pOrder !== 'support') {
@@ -384,7 +405,7 @@
     let threat = null, td = Infinity;
     for (const E of foes) {
       // horses are twice as fast as a man on foot: running from them only wastes the volley
-      if (E.role === 'missile' || E.role === 'cavalry' || E.routing) continue;
+      if (E.role === 'missile' || E.def.mounted || E.routing) continue;
       const d = gapTo(R, E);
       if (d < td) { td = d; threat = E; }
     }
@@ -398,7 +419,7 @@
       // men who ran themselves out stay and fight until they have their breath back
       const spent = R.winded;
       let goal = null;
-      if (!caught && !spent) {
+      if (!caught && !spent && !R.def.steady) {   // crossbowmen behind their pavises do not run
         const ax = R.cx - threat.cx, ay = R.cy - threat.cy, al = Math.hypot(ax, ay) || 1;
         let dx = ax / al, dy = ay / al;
         const cov = coverPoint(R, friends, threat);
@@ -427,6 +448,8 @@
       if (E.routing) s += 120;
       if (closing(E, R)) s -= 140;
       if (E === R.target) s -= 60;                       // keep the volleys on one enemy
+      if (E === G.focus && d < range + 40) s -= 60;
+      if (R.def.ranged.pierce && (E.type === 'knight' || E.type === 'giant' || E.type === 'general')) s -= 150; // bolts are for armour
       if (s < bs) { bs = s; best = E; }
     }
     R.target = best;
@@ -450,7 +473,7 @@
       if (tooFar) R.stop(); else R.go(best.cx, best.cy, hasLine ? Math.min(R.maxSpeed, G.pace) : R.maxSpeed);
       return;
     }
-    if (R.order !== 'shoot') tacticalEvent(B, R, 'volley', `${TM.TEAMS[R.team].name}: ${R.name} дают залп`);
+    if (R.order !== 'shoot') tacticalEvent(B, R, 'volley', `${TM.TEAMS[R.team].name}: ${R.name} ${R.def.ranged.aimed ? 'открывают огонь' : 'дают залп'}`);
     R.setOrder('shoot'); R.stop();
     R.volleyT -= THINK;
     if (R.volleyT <= 0) volley(R, B, best);
@@ -507,17 +530,20 @@
       u.volleyTarget = pick[(U.rand() * k) | 0];
       fired++;
     }
-    R.volleyT = fired ? R.def.ranged.cooldown : 0.2;
+    // crossbowmen shoot at will (whoever is loaded, every decision); bows loose together on command
+    R.volleyT = R.def.ranged.aimed || !fired ? 0.2 : R.def.ranged.cooldown * (T_KIND(B, R) === 'tactician' ? 0.94 : 1);
   }
 
   function cavalryScore(R, B) {
-    const base = { archer: 3.2, knight: 1.6, sword: 1, spear: 0.35, giant: 0.15 };
+    const base = { archer: 3.2, crossbow: 2.8, horsearcher: 1.1, knight: 1.6, sword: 1, berserk: 0.9, spear: 0.35, giant: 0.15, general: 2.6 };
     return (E) => {
       let v = base[E.type] || 1;
       if (E.engaged > 0.2) v *= 2.2;                        // hit them while they are busy
       if (E.routing) v *= 1.8;                              // ride down the fugitives
       if (E.type === 'spear' && E.engaged < 0.25) v *= 0.25; // never into an unengaged pike wall
       if (E.role === 'cavalry' && closing(E, R)) v *= 2.5;   // meet a charge with a counter-charge
+      // light horse with empty quivers only goes for men already busy, fleeing or loose bowmen
+      if (R.role === 'skirmisher' && !(E.engaged > 0.2 || E.routing || E.role === 'missile' || E.role === 'skirmisher')) v *= 0.2;
       v *= E.n / (E.n + 8);
       const d = dist(R.cx, R.cy, E.cx, E.cy);
       return -v / (1 + d / 450);
@@ -651,6 +677,148 @@
     R.goalAngle = Math.atan2(dy, dx);
   }
 
+
+  // ---------------------------------------------------------------- the general
+  // A single rider with a regiment of his own. Where he goes depends on his archetype:
+  //   marshal   — behind the line, at the regiment that needs him most; rides to routed men to rally them;
+  //   warlord   — at the head of the most heated fight, sword in hand;
+  //   tactician — well behind the army, where he can see it (his effect is army-wide, see general()).
+  // Wounded below a third, any of them rides back to safety; the marshal and the tactician also keep
+  // out of reach of enemies.
+  function thinkGeneral(R, B, G, foes) {
+    const u = R.members[0];
+    if (!u || u.state !== ALIVE) { R.stop(); return; }
+    const T = B.tac, kind = u.genKind, bx = -G.axX, by = -G.axY;
+    const C = TM.CONFIG;
+    const go = (x, y, sp) => R.go(U.clamp(x, 30, C.WORLD_W - 30), U.clamp(y, 30, C.WORLD_H - 30), sp);
+    const friends = T.regs.filter((F) => F.team === R.team && F !== R && F.active());
+    const line = friends.filter((F) => F.role === 'front' || F.role === 'support' || F.role === 'monster');
+    R.face(G.ecx, G.ecy);
+    if (u.hp < u.maxHp * (kind === 'warlord' ? 0.18 : 0.33)) {   // a warlord quits the fight only when nearly dead
+      R.setOrder('retreat');
+      go(G.cx + bx * 260, G.cy + by * 260, R.maxSpeed);
+      return;
+    }
+    if (kind !== 'warlord') {
+      let threat = null, td = Infinity;
+      for (const E of foes) { if (!E.active()) continue; const d = gapTo(R, E); if (d < td) { td = d; threat = E; } }
+      if (threat && td < (kind === 'tactician' ? 140 : 70)) {
+        const W = openGoal(R.cx, R.cy, R.cx - threat.cx, R.cy - threat.cy, 160, threat.cx, threat.cy, foes);
+        if (W) { R.setOrder('withdraw'); go(W.x, W.y, R.maxSpeed); return; }
+      }
+    }
+    if (kind === 'marshal') {
+      // men in flight nearby: ride to them and rally them
+      let rout = null, rd = 650;
+      for (const F of T.regs) {
+        if (F.team !== R.team || F === R || F.fleeing < 4 || F.def.fearless) continue;
+        const d = dist(R.cx, R.cy, F.fcx, F.fcy);
+        if (d < rd) { rd = d; rout = F; }
+      }
+      if (rout) {
+        if (R.order !== 'rally') tacticalEvent(B, R, 'marshal', `${TM.TEAMS[R.team].name}: маршал собирает бегущих (${rout.name})`);
+        R.setOrder('rally');
+        go(rout.fcx + bx * 20, rout.fcy + by * 20, R.maxSpeed);
+        return;
+      }
+      // otherwise behind the line regiment in the worst state
+      let F = null, fs = Infinity;
+      for (const L of line) { const s = L.strength - L.engaged * 0.5 + dist(L.cx, L.cy, G.cx, G.cy) / 2000; if (s < fs) { fs = s; F = L; } }
+      R.setOrder('command');
+      if (F) go(F.cx + bx * (F.radius * 0.6 + 55), F.cy + by * (F.radius * 0.6 + 55), R.maxSpeed * 0.7);
+      else go(G.cx + bx * 120, G.cy + by * 120, R.maxSpeed * 0.7);
+      return;
+    }
+    if (kind === 'warlord') {
+      // at the head of the hottest fight; before the clash, in front of the middle of the line
+      let F = null, fe = 0.1;
+      for (const L of line) if (L.engaged > fe) { fe = L.engaged; F = L; }
+      if (F) {
+        if (R.order !== 'lead') tacticalEvent(B, R, 'warlord', `${TM.TEAMS[R.team].name}: вождь сам ведёт полк в бой (${F.name})`);
+        R.setOrder('lead');
+        const E = F.target && F.target.active() ? F.target : null;
+        if (E) go(E.cx, E.cy, R.maxSpeed); else go(F.frontX(), F.frontY(), R.maxSpeed);
+        return;
+      }
+      if (!line.length) {
+        // no army to lead: fight whatever is nearest
+        let E = null, ed = Infinity;
+        for (const X of foes) { if (!X.active()) continue; const d = gapTo(R, X); if (d < ed) { ed = d; E = X; } }
+        R.setOrder('lead');
+        if (E) go(E.cx, E.cy, R.maxSpeed);
+        return;
+      }
+      R.setOrder('command');
+      let px = 0, py = 0, n = 0;
+      for (const L of line) { px += L.frontX(); py += L.frontY(); n++; }
+      go(px / n - bx * 25, py / n - by * 25, Math.min(R.maxSpeed, G.pace));
+      return;
+    }
+    // tactician
+    R.setOrder('command');
+    go(G.cx + bx * 190, G.cy + by * 190, R.maxSpeed * 0.7);
+  }
+
+  // ---------------------------------------------------------------- light horse
+  // Horse archers keep at bow range from their quarry and ride round it, shooting from the saddle
+  // (units.js). Anything that could catch them (horse, or foot closing in) makes them gallop off
+  // first. They prefer fugitives and slow foot, and keep away from archers who outrange them.
+  function thinkSkirmisher(R, B, G, foes) {
+    const range = R.def.ranged.range, C = TM.CONFIG;
+    // quivers empty: from now on they fight as light horse (flank, rear, fugitives)
+    if (!R.spent) {
+      let left = 0;
+      for (const u of R.members) if (u.state === ALIVE && !u.fleeing) left += u.ammo;
+      if (R.n && left < R.n * 1.5) {
+        R.spent = true;
+        tacticalEvent(B, R, 'quiver', `${TM.TEAMS[R.team].name}: ${R.name} расстреляли колчаны и идут врукопашную`);
+      }
+    }
+    if (R.spent) return thinkCavalry(R, B, G, foes);
+    let threat = null, td = Infinity;
+    for (const E of foes) {
+      if (!E.active() || E.role === 'missile' || E.role === 'skirmisher') continue;
+      const lim = E.def.mounted ? 210 : 95;
+      const d = gapTo(R, E);
+      if (d < lim && d < td) { td = d; threat = E; }
+    }
+    if (threat) {
+      const W = R.sta > 0.15 ? openGoal(R.cx, R.cy, R.cx - threat.cx, R.cy - threat.cy, 220, threat.cx, threat.cy, foes) : null;
+      if (W) {
+        R.setOrder('evade'); R.go(W.x, W.y, R.maxSpeed);
+        R.goalAngle = Math.atan2(W.y - R.cy, W.x - R.cx);
+        const nr = threat.nearest(R.cx, R.cy);
+        R.aim = nr ? nr.u : null; R.target = threat;   // shooting back over the horse's tail
+        return;
+      }
+      R.setOrder('melee'); R.stop(); R.target = threat; R.aim = null;
+      return;
+    }
+    const focus = G.focus;
+    const tgt = pickTarget(R, B, foes, (E) => {
+      let s = dist(R.cx, R.cy, E.cx, E.cy);
+      if (E.routing) s -= 260;
+      if (E.role === 'missile' && E.def.ranged.range > range + 20) s += 320;
+      if (E.def.mounted) s += 260;
+      if (E.role === 'monster') s += 120;
+      if (E === focus) s -= 120;
+      return s;
+    });
+    R.target = tgt;
+    if (!tgt) { R.setOrder('hold'); R.stop(); R.aim = null; return; }
+    const nr = tgt.nearest(R.cx, R.cy);
+    R.aim = nr ? nr.u : null;
+    if (R.side == null) R.side = 1;
+    // circle round the target at ~3/4 of bow range, at a canter (a gallop is kept for escapes)
+    const a = Math.atan2(R.cy - tgt.cy, R.cx - tgt.cx) + 0.22 * R.side;
+    const rr = range * 0.74 + tgt.radius * 0.4;
+    let gx = tgt.cx + Math.cos(a) * rr, gy = tgt.cy + Math.sin(a) * rr;
+    if (gx < 60 || gx > C.WORLD_W - 60 || gy < 60 || gy > C.WORLD_H - 60) { R.side = -R.side; gx = U.clamp(gx, 60, C.WORLD_W - 60); gy = U.clamp(gy, 60, C.WORLD_H - 60); }
+    R.setOrder(tgt.routing ? 'pursue' : 'harass');
+    R.go(gx, gy, R.maxSpeed * (tgt.routing ? 0.95 : 0.75));
+    R.goalAngle = Math.atan2(tgt.cy - R.cy, tgt.cx - R.cx);
+  }
+
   // ---------------------------------------------------------------- rout & rally
   function thinkMorale(R, B) {
     // every tenth of the regiment lost shakes the survivors
@@ -662,7 +830,8 @@
       if (B.opts.morale) for (const u of R.members) if (u.state === ALIVE && !u.def.fearless) u.morale -= hit;
     }
     if (!R.routing) {
-      if (R.alive >= 3 && R.fleeing / R.alive >= 0.4) {
+      // with the marshal alive a regiment holds until half of it is running
+      if (R.alive >= 3 && R.fleeing / R.alive >= (T_KIND(B, R) === 'marshal' ? 0.55 : 0.4)) {
         R.routing = true;
         R.setOrder('rout'); R.stop(); R.target = null;
         if (R.alive >= 6) tacticalEvent(B, R, 'rout', `${TM.TEAMS[R.team].name}: ${R.name} бегут!`);
@@ -680,7 +849,7 @@
       return false;
     }
     // rally: enough men have stopped running to re-form the regiment where they stand
-    if (R.n >= 3 && R.n >= 0.4 * R.alive) {
+    if (R.n >= 3 && R.n >= (T_KIND(B, R) === 'marshal' ? 0.3 : 0.4) * R.alive) {
       R.routing = false;
       R.ax = R.cx; R.ay = R.cy; R.compactCount = -1;
       R.setOrder('reform'); R.phaseT = 0; R.stop();
@@ -703,6 +872,7 @@
   // ---------------------------------------------------------------- build & update
   const TACTICS = {
     partition,
+    clearShot,
 
     // specs: [{team, type, angle, doctrine, members: [units]}]
     build(B, specs) {
@@ -733,7 +903,7 @@
       }
       // cavalry remembers its place on the flank
       for (const R of T.regs) {
-        if (R.role !== 'cavalry') continue;
+        if (R.role !== 'cavalry' && R.role !== 'skirmisher') continue;
         const G = T.gen[R.team];
         const lat = (R.ax - G.cx) * -G.axY + (R.ay - G.cy) * G.axX;
         R.side = lat >= 0 ? 1 : -1; R.screenOff = Math.abs(lat);
@@ -769,6 +939,8 @@
           const pool = live.length ? live : foes;
           if (R.role === 'missile') thinkMissile(R, B, G, pool, T.regs.filter((r) => r.team === R.team));
           else if (R.role === 'cavalry') thinkCavalry(R, B, G, foes.length ? foes : pool);
+          else if (R.role === 'skirmisher') thinkSkirmisher(R, B, G, foes.length ? foes : pool);
+          else if (R.role === 'general') thinkGeneral(R, B, G, pool);
           else thinkFront(R, B, G, pool);
         }
       }
@@ -789,6 +961,8 @@
       const R = u.reg, o = R.order;
       if (R.role === 'monster') return o === 'engage' || o === 'charge' ? 110 : 34;
       if (R.role === 'cavalry') return o === 'melee' ? 75 : o === 'lance' ? 50 : 22;
+      if (R.role === 'general') return o === 'lead' ? 80 : 18;
+      if (R.role === 'skirmisher') return R.spent ? (o === 'melee' ? 75 : o === 'lance' ? 50 : 22) : o === 'melee' ? 60 : 10;
       if (R.role === 'missile') return 6;
       const fight = o === 'engage' || o === 'charge';
       if (R.discipline === 0) return fight ? 90 : 30;
@@ -801,7 +975,8 @@
       hold: 'держат строй', advance: 'наступают', charge: 'в атаку', engage: 'сеча', brace: 'копья вперёд',
       support: 'резерв', shoot: 'залп', fallback: 'отходят', screen: 'прикрывают фланг', flank: 'обход',
       approach: 'сближение', lance: 'таран', melee: 'рубка', withdraw: 'отход', reform: 'строятся', rout: 'бегут',
-      stand: 'отбиваются',
+      stand: 'отбиваются', evade: 'уходят', harass: 'обстрел', pursue: 'преследуют',
+      command: 'командует', lead: 'ведёт в бой', rally: 'собирает бегущих', retreat: 'отходит раненым',
     },
   };
 

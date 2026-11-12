@@ -18,12 +18,21 @@ If the browser blocks local files, serve the folder with any static server, for 
 
 ## Features
 
-- **Five unit classes** with distinct roles: swordsmen (shields block arrows), spearmen (brace
+- **Eight unit classes.** The core five: swordsmen (shields block arrows), spearmen (brace
   against cavalry), archers (volley fire, skirmish back), knights (lance charges) and giants
   (sweeping club blows that throw men into the air).
 - **Regimental AI.** Armies are split into regiments that keep their ranks, fill gaps from the
   rear, advance as one line, hold reserves, flank, charge and withdraw. Each arm follows its own
   doctrine: pike walls, timed volleys, the cavalry cycle of flank, charge, withdraw and re-form.
+- **Three more arms that change how a battle plays**: berserkers (no shields, no ranks, fury
+  from wounds, run out of breath fast), crossbowmen (shoot at will, bolts pierce shields and
+  plate, hold their ground instead of skirmishing) and horse archers (circle and shoot from the
+  saddle, flee from anything that can catch them, a limited quiver after which they fight as
+  light horse).
+- **Generals.** One optional commander per army, a rider on the field with his own behaviour:
+  the marshal steadies the line and rallies routed regiments, the warlord leads the hottest fight
+  himself and makes the men around him strike harder, the tactician stays back and coordinates
+  (focused fire, timely reserves). A general can fall, which shakes his whole army.
 - **Morale and panic.** Losses, wounds, flank attacks and terror spread through the ranks; whole
   regiments break and rout; an army that runs entirely loses.
 - **Stamina.** Running, charging and fighting tire soldiers; tired men are slower and strike less

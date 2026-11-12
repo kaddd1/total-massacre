@@ -196,6 +196,12 @@ async function viewTests(b) {
   check('effects and drawing never change the battle (same seed, with and without them)', fp[0] === fp[1], fp);
 
   await b.open('?preset=0&seed=42');
+  await b.ev(`document.querySelector('#gen-0 button[data-g=tactician]').click()`); await sleep(300);
+  check('the general selector puts a general in the army', await b.ev(`TM.Game.setup.armies[0].general === 'tactician' && TM.Game.battle.units.some((u) => u.type === 'general' && u.team === 0 && u.genKind === 'tactician') && document.querySelector('#gen-0 button.on').dataset.g === 'tactician'`));
+  await b.ev(`[...document.querySelectorAll('#preset-list button')].find(x => x.textContent.includes('Ярость')).click()`); await sleep(400);
+  check('new arms and generals appear in the scenarios', await b.ev(`(() => { const t = new Set(TM.Game.battle.units.map((u) => u.type)); return ['berserk', 'crossbow', 'horsearcher', 'general'].every((k) => t.has(k)); })()`));
+  await b.ev(`document.querySelector('#gen-0 button[data-g=""]').click()`); await sleep(200);
+  await b.open('?preset=0&seed=42');
   await b.ev('TM.Game.start()'); await sleep(500);
   check('"to battle" title at the start', await b.ev(`document.getElementById('banner').classList.contains('show') && document.querySelector('#banner .bn-title').textContent.length > 3`));
   check('every regiment carries its standard', await b.ev(`(() => { const R = TM.Game.renderer, B = TM.Game.battle; return R.bearers.size === B.tac.regs.filter((r) => r.n > 0).length && [...R.bearers.keys()].every((u) => u.state === 0 && !u.fleeing); })()`));

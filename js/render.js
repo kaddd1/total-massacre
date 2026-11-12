@@ -15,17 +15,17 @@
   // ---------------------------------------------------------------- animation choice
   // Visual-only state machine: reads simulation state, never writes it.
   let A = 'idle', F = 0, WIN = -1, NOW = 0;
-  const HURT = { sword: 1, spear: 1, archer: 1 };
+  const HURT = { sword: 1, spear: 1, archer: 1, berserk: 1, crossbow: 1 };
   function choose(u) {
     if (u.state === DYING) { A = 'death'; F = u.deathT < 0.12 ? 0 : u.deathT < 0.26 ? 1 : 2; return; }
     const t = u.type;
     if (u.z > 2) {
       // the winners jump for joy, swords and clubs in the air; anyone else up there was knocked flying
-      if (u.team === WIN) { if (t === 'sword' || t === 'giant') { A = 'attack'; F = 0; } else { A = 'idle'; F = 0; } return; }
+      if (u.team === WIN) { if (t === 'sword' || t === 'giant' || t === 'berserk' || t === 'general') { A = 'attack'; F = 0; } else { A = 'idle'; F = 0; } return; }
       A = 'death'; F = u.vz > 0 ? 0 : 1; return;
     }
     const moving = u.moveAmt > 0.15;
-    if (u.fleeing && t !== 'knight' && t !== 'giant') { A = 'flee'; F = ((Math.floor(u.walk / (Math.PI / 2)) % 4) + 4) % 4; return; }
+    if (u.fleeing && !u.def.mounted && t !== 'giant') { A = 'flee'; F = ((Math.floor(u.walk / (Math.PI / 2)) % 4) + 4) % 4; return; }
     if (u.atkT >= 0) {
       const w = u.def.windup;
       A = 'attack'; F = u.atkT < w ? 0 : u.atkT < w + 0.09 ? 1 : 2;
@@ -45,7 +45,14 @@
       }
       wf = ((Math.floor(wph / (Math.PI / 2)) % 4) + 4) % 4;
     }
-    if (t === 'archer') {
+    if (t === 'crossbow') {
+      if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
+      if (!moving && u.rangedCd > 1.1 && u.shotT < 6) { A = 'reload'; F = 0; return; }   // spanning the bow again
+      if (tg && !moving && Math.hypot(tg.x - u.x, tg.y - u.y) <= u.def.ranged.range + 30) { A = 'aim'; F = 0; return; }
+    } else if (t === 'horsearcher') {
+      if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
+      if (!moving && u.rangedCd < 0.5 && u.ammo > 0 && tg) { A = 'aim'; F = 0; return; }
+    } else if (t === 'archer') {
       if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
       if (tg && !moving && u.rangedCd < 1.1 && Math.hypot(tg.x - u.x, tg.y - u.y) <= u.def.ranged.range + 30) { A = 'aim'; F = 0; return; }
     } else if (t === 'spear') {
@@ -65,7 +72,7 @@
   // ---------------------------------------------------------------- regiment standards
   // Every formed regiment carries its standard: a soldier of the second rank, centre. If he falls,
   // the nearest man picks it up; when the regiment breaks (or dies) the standard drops to the ground.
-  const STD_BASE = { sword: 4, spear: 4, archer: 4, knight: 9, giant: 19 }; // hand height, art px
+  const STD_BASE = { sword: 4, spear: 4, berserk: 4, archer: 4, crossbow: 4, knight: 9, horsearcher: 9, giant: 19, general: 11 }; // hand height, art px
   function pickBearer(R, s) {
     let best = null, bd = Infinity;
     const fresh = !s.bearer, td = R.front - R.spacing * 1.5;
@@ -82,6 +89,7 @@
   const PING = {
     rout: ['#ffb347', 70, 2.6], break: ['#ffb347', 130, 3], rear: ['#ff6a4a', 55, 2.2], flank: [null, 45, 1.8],
     brace: ['#efe9d8', 45, 1.8], reserve: [null, 55, 2], volley: ['#ffd34d', 35, 1.3], rally: ['#8fe060', 50, 2.2],
+    genfall: ['#ffd34d', 160, 3.2], marshal: ['#ffd34d', 50, 2], warlord: ['#ff6a4a', 50, 2], quiver: [null, 40, 1.6],
     giant: ['#ffd34d', 80, 2.6], blood: ['#ff6a4a', 35, 1.6], hero: ['#ffffff', 30, 1.6], win: [null, 150, 3.2],
     stand: ['#ffb347', 45, 1.8], giveup: [null, 40, 1.6],
   };
@@ -151,7 +159,7 @@
       const scale = si === 0 ? n : S.SCALES[si];
       const base = Math.round(STD_BASE[u.type] * scale) + (mark ? 1 : 0);
       const h = BN.H + 2 * pad - (mark ? (si === 0 ? 6 : si === 1 ? 9 : 12) : 0), w = BN.W + 2 * pad;
-      const off = mark ? 1 : (u.type === 'knight' ? 4 : u.type === 'giant' ? 9 : 3) * n;
+      const off = mark ? 1 : (u.def.mounted ? 4 : u.type === 'giant' ? 9 : 3) * n;
       ctx.drawImage(cv, 0, 0, w, h, px + off - (BN.AX + pad) * k, py - base - h * k, w * k, h * k);
     }
 
@@ -256,6 +264,10 @@
         for (const u of fReg.members) if (u.state === ALIVE && u.x > cx0 && u.x < cx1 && u.y > cy0 && u.y < cy1) this.drawRing(ctx, u, col, D, ox, oy, n);
         ctx.globalAlpha = 1;
       }
+      // the generals stand on a gold ring so the eye finds them in the crowd
+      if (B.generals) for (const g of B.generals) if (g && g.state === ALIVE && g.x > cx0 && g.x < cx1 && g.y > cy0 && g.y < cy1) {
+        ctx.globalAlpha = 0.8; this.drawRing(ctx, g, '#ffd34d', D, ox, oy, n); ctx.globalAlpha = 1;
+      }
       this.drawRing(ctx, hover, '#f4efe2', D, ox, oy, n);
       this.drawRing(ctx, follow, '#ffd34d', D, ox, oy, n);
 
@@ -270,7 +282,7 @@
         ctx.drawImage(set.color[u.team], fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
         if (u.hitFlash > 0 && u.state === ALIVE && si <= 1) {
           // hit flash: white silhouette fading out over the normal sprite
-          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * (u.type === 'giant' ? 0.35 : u.type === 'knight' ? 0.55 : 0.75); // big targets are hit all the time
+          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * (u.type === 'giant' ? 0.35 : u.def.mounted ? 0.55 : 0.75); // big targets are hit all the time
           ctx.drawImage(set.flash, fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
           ctx.globalAlpha = 1;
         }
@@ -410,7 +422,7 @@
 
     drawRing(ctx, u, col, D, ox, oy, n) {
       if (!u || u.state !== ALIVE) return;
-      const r = Math.max(2, Math.round(u.r * Math.min(1, D) * (u.type === 'knight' ? 1.3 : 1)));
+      const r = Math.max(2, Math.round(u.r * Math.min(1, D) * (u.def.mounted ? 1.3 : 1)));
       const cv = TM.Sprites.ring(r, col);
       const px = Math.round(u.x * D + ox), py = Math.round(u.y * D + oy);
       ctx.drawImage(cv, px - Math.floor(cv.width / 2) * n, py - Math.floor(cv.height / 2) * n, cv.width * n, cv.height * n);
@@ -590,8 +602,8 @@
         if (u === follow) followTop = [px, top];
         const hpR = u.hp / u.maxHp;
         const t = u.type;
-        if (hpR < 0.999 && (t === 'giant' || t === 'knight' || smallBars)) {
-          const wa = t === 'giant' ? 22 : t === 'knight' ? 14 : 10;
+        if (hpR < 0.999 && (t === 'giant' || t === 'knight' || t === 'general' || smallBars)) {
+          const wa = t === 'giant' ? 22 : t === 'general' ? 18 : u.def.mounted ? 14 : 10;
           const bx = px - ((wa + 2) >> 1) * k, by = top - 4 * k;
           ctx.fillStyle = '#120c0b'; ctx.fillRect(bx, by, (wa + 2) * k, 3 * k);
           ctx.fillStyle = '#3a1a14'; ctx.fillRect(bx + k, by + k, wa * k, k);

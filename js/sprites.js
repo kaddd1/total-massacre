@@ -284,6 +284,15 @@
       P.push(E([hx - 0.2, 0, hh + 0.3], [2.5, 2.55, 2.5], M.team, { clip: [[1, 0, 0, 1.1], [0, 0, -1, 1.3]] }));
       P.push(C([hx - 0.4, 0, hh + 2.4], [hx - 1.6, 0, hh + 3.6], 0.7, 0.35, M.team));
       P.push(C([hx - 2.0, 0, hh - 0.6], [hx - 2.6, 0, hh - 2.8], 0.9, 0.5, M.team));
+    } else if (type === 'kettle') {
+      P.push(E([hx - 0.05, 0, hh + 0.7], [2.3, 2.3, 1.8], M.teamDark, { clip: [[0, 0, -1, 0.3]] }));
+      P.push(E([hx - 0.05, 0, hh + 0.7], [2.95, 2.95, 0.26], M.steel));
+      P.push(S([hx - 0.05, 0, hh + 2.5], 0.6, M.trim));
+    } else if (type === 'wild') {
+      P.push(E([hx - 0.5, 0, hh + 0.7], [2.5, 2.6, 2.3], M.hair, { clip: [[1, 0, 0, 1.0]] }));
+      P.push(C([hx + 1.7, 0, hh - 1.2], [hx + 1.4, 0, hh - 3.2], 1.2, 0.6, M.hair));     // beard
+      P.push(E([hx - 0.1, 0, hh + 1.1], [2.55, 2.55, 0.42], M.team));                    // headband
+      for (const sd of [-1, 1]) P.push(C([hx - 0.2, sd * 2.0, hh + 1.6], [hx + 0.4, sd * 3.4, hh + 3.6], 0.55, 0.15, M.bone));
     } else if (type === 'greathelm') {
       P.push(E([hx, 0, hh + 0.2], [2.5, 2.5, 2.9], M.steel));
       P.push(E([hx + 2.35, 0, hh + 0.4], [0.35, 1.6, 0.36], M.eye));
@@ -379,6 +388,84 @@
     }
   }
 
+  // ------------------------------------------------------------------ horses and riders
+  // A horse at gallop phase ph (null: standing). barded: the knight's team-coloured caparison.
+  function horse(ph, bob, barded) {
+    const H = [];
+    H.push(E([-0.2, 0, 7.3 + bob], [6.9, 3.3, 3.15], barded ? M.team : M.horse));
+    if (barded) H.push(E([-0.2, 0, 4.7 + bob], [6.95, 3.35, 0.45], M.trim));
+    else {
+      H.push(E([-0.6, 0, 10.0 + bob], [3.1, 3.45, 0.7], M.team));   // saddle cloth
+      H.push(E([-0.6, 0, 9.6 + bob], [3.2, 3.5, 0.3], M.trim));
+    }
+    H.push(C([4.6, 0, 9.2 + bob], [7.4, 0, 12.7 + bob], 2.1, 1.55, M.horse));
+    H.push(C([4.0, 0, 11.1 + bob], [6.9, 0, 14.5 + bob], 0.85, 0.6, M.mane));
+    H.push(E([9.1, 0, 12.4 + bob], [2.7, 1.35, 1.55], M.horse, { R: rotY(-0.55) }));
+    if (barded) H.push(E([7.1, 0, 12.0 + bob], [2.6, 1.85, 1.9], M.team, { clip: [[1, 0, 0, 1.2]] }));
+    for (const sd of [-1, 1]) {
+      H.push(S([9.0, sd * 1.25, 13.3 + bob], 0.36, M.eye));
+      H.push(C([7.6, sd * 0.7, 14.3 + bob], [7.3, sd * 0.85, 15.7 + bob], 0.45, 0.3, M.mane));
+    }
+    const tailSw = ph == null ? 0 : Math.sin(ph) * 0.9;
+    H.push(C([-6.7, 0, 8.8 + bob], [-9.1, tailSw, 4.8 + bob], 1.1, 0.6, M.mane));
+    const legs = [[4.0, -1.6, 0], [4.0, 1.6, 0.7], [-4.2, -1.6, Math.PI], [-4.2, 1.6, Math.PI + 0.7]];
+    for (const [lx, ly, off] of legs) {
+      const a = ph == null ? 0 : Math.sin(ph + off) * 0.62;
+      const lift = ph == null ? 0 : Math.max(0, Math.sin(ph + off + Math.PI / 2)) * 1.3;
+      const hip = [lx, ly, 6.0 + bob], hoof = [lx + Math.sin(a) * 5.6, ly, 0.6 + lift];
+      H.push(C(hip, hoof, 0.95, 0.6, M.horse));
+      H.push(E(hoof, [0.75, 0.6, 0.5], M.mane));
+    }
+    return H;
+  }
+
+  function riderLegs(Rr, sb, mat) {
+    for (const sd of [-1, 1]) {
+      Rr.push(C([-0.6, sd * 1.7, 11.2 + sb], [1.2, sd * 3.35, 10.2 + sb], 1.05, 0.95, mat));
+      Rr.push(C([1.2, sd * 3.35, 10.2 + sb], [0.7, sd * 3.45, 7.6 + sb], 0.9, 0.8, mat));
+      Rr.push(E([1.3, sd * 3.45, 7.2 + sb], [1.3, 0.8, 0.7], M.boot));
+    }
+  }
+
+  function mounted(H, Rr) {
+    const P = [];
+    for (const p of H) { p.g = 'horse'; P.push(p); }
+    for (const p of Rr) { p.g = 'rider'; P.push(p); }
+    return P;
+  }
+
+  // a hand axe: haft along dir, a bearded blade at the top
+  function axe(P, hand, dir) {
+    const d = norm(dir);
+    let perp = cross(d, [0, 0, 1]);
+    if (Math.hypot(perp[0], perp[1], perp[2]) < 0.2) perp = [1, 0, 0];
+    perp = norm(perp);
+    P.push(C(add(hand, mul(d, -1.0)), add(hand, mul(d, 6.6)), 0.42, 0.38, M.wood));
+    const top = add(hand, mul(d, 6.4)), low = add(add(hand, mul(d, 4.4)), mul(perp, 1.9));
+    P.push(C(top, low, 0.85, 0.35, M.steel));
+    P.push(C(add(top, mul(perp, 0.4)), add(low, mul(perp, 0.6)), 0.5, 0.5, M.steel));
+  }
+
+  // a crossbow: stock along fwd from the trigger hand, steel prod at the tip
+  function crossbow(P, hand, fwd, spanned) {
+    const d = norm(fwd);
+    let side = cross(d, [0, 0, 1]);
+    if (Math.hypot(side[0], side[1], side[2]) < 0.2) side = [0, 1, 0];
+    side = norm(side);
+    const tip = add(hand, mul(d, 5.2));
+    P.push(C(add(hand, mul(d, -2.4)), tip, 0.6, 0.45, M.wood));
+    const e1 = add(add(tip, mul(side, 3.4)), mul(d, -1.1)), e2 = add(add(tip, mul(side, -3.4)), mul(d, -1.1));
+    P.push(C(tip, e1, 0.45, 0.3, M.steel));
+    P.push(C(tip, e2, 0.45, 0.3, M.steel));
+    const nut = spanned ? add(hand, mul(d, 1.2)) : add(tip, mul(d, -0.6));
+    P.push(C(e1, nut, 0.22, 0.22, M.string));
+    P.push(C(nut, e2, 0.22, 0.22, M.string));
+    if (spanned) {
+      P.push(C(nut, add(tip, mul(d, 0.6)), 0.3, 0.3, M.wood));
+      P.push(C(add(tip, mul(d, 0.4)), add(tip, mul(d, 1.5)), 0.5, 0.1, M.steel));
+    }
+  }
+
   // ------------------------------------------------------------------ class models
   const PH = (f) => f * Math.PI / 2;          // 4-frame walk cycle phase
   const RAISED = (bob) => [[0.7, 3.2, 16.2 + bob], [0.7, -3.2, 16.2 + bob]]; // hands up (panic)
@@ -469,36 +556,11 @@
       const leveled = anim === 'charge' || anim === 'ready' || anim === 'attack';
       const P = [];
       const bob = ph == null ? 0 : Math.sin(ph * 2) * 0.4;
-      // --- horse
-      const H = [];
-      H.push(E([-0.2, 0, 7.3 + bob], [6.9, 3.3, 3.15], M.team));
-      H.push(E([-0.2, 0, 4.7 + bob], [6.95, 3.35, 0.45], M.trim));
-      H.push(C([4.6, 0, 9.2 + bob], [7.4, 0, 12.7 + bob], 2.1, 1.55, M.horse));
-      H.push(C([4.0, 0, 11.1 + bob], [6.9, 0, 14.5 + bob], 0.85, 0.6, M.mane));
-      H.push(E([9.1, 0, 12.4 + bob], [2.7, 1.35, 1.55], M.horse, { R: rotY(-0.55) }));
-      H.push(E([7.1, 0, 12.0 + bob], [2.6, 1.85, 1.9], M.team, { clip: [[1, 0, 0, 1.2]] }));
-      for (const sd of [-1, 1]) {
-        H.push(S([9.0, sd * 1.25, 13.3 + bob], 0.36, M.eye));
-        H.push(C([7.6, sd * 0.7, 14.3 + bob], [7.3, sd * 0.85, 15.7 + bob], 0.45, 0.3, M.mane));
-      }
-      const tailSw = ph == null ? 0 : Math.sin(ph) * 0.9;
-      H.push(C([-6.7, 0, 8.8 + bob], [-9.1, tailSw, 4.8 + bob], 1.1, 0.6, M.mane));
-      const legs = [[4.0, -1.6, 0], [4.0, 1.6, 0.7], [-4.2, -1.6, Math.PI], [-4.2, 1.6, Math.PI + 0.7]];
-      for (const [lx, ly, off] of legs) {
-        const a = ph == null ? 0 : Math.sin(ph + off) * 0.62;
-        const lift = ph == null ? 0 : Math.max(0, Math.sin(ph + off + Math.PI / 2)) * 1.3;
-        const hip = [lx, ly, 6.0 + bob], hoof = [lx + Math.sin(a) * 5.6, ly, 0.6 + lift];
-        H.push(C(hip, hoof, 0.95, 0.6, M.horse));
-        H.push(E(hoof, [0.75, 0.6, 0.5], M.mane));
-      }
+      const H = horse(ph, bob, true);
       // --- rider
       const Rr = [];
       const sb = bob + 0.0;
-      for (const sd of [-1, 1]) {
-        Rr.push(C([-0.6, sd * 1.7, 11.2 + sb], [1.2, sd * 3.35, 10.2 + sb], 1.05, 0.95, M.steel));
-        Rr.push(C([1.2, sd * 3.35, 10.2 + sb], [0.7, sd * 3.45, 7.6 + sb], 0.9, 0.8, M.steel));
-        Rr.push(E([1.3, sd * 3.45, 7.2 + sb], [1.3, 0.8, 0.7], M.boot));
-      }
+      riderLegs(Rr, sb, M.steel);
       Rr.push(E([-0.7, 0, 14.2 + sb], [2.1, 2.8, 2.9], M.team));
       Rr.push(E([-0.7, 0, 12.2 + sb], [2.2, 2.85, 0.6], M.leather));
       for (const sd of [-1, 1]) Rr.push(S([-0.7, sd * 2.9, 16.1 + sb], 1.05, M.steel));
@@ -529,6 +591,121 @@
       for (const p of Rr) { p.g = 'rider'; P.push(p); }
       return P;
     },
+
+    berserk(anim, f) {
+      if (anim === 'flee') {
+        const [r, l] = RAISED(0.3);
+        const hu = humanoid({ phase: PH(f), run: true, gear: 'wild', torso: M.skin, arms: M.skin, legs: M.team, rHand: r, lHand: l });
+        berserkGear(hu.P, hu.bob);
+        return hu.P;
+      }
+      const ph = anim === 'walk' ? PH(f) : null;
+      const swing = ph == null ? 0 : Math.sin(ph);
+      let rHand = [1.6 - swing * 1.2, 3.6, 7.2], lHand = [1.6 + swing * 1.2, -3.6, 7.2];
+      let rDir = [0.7, 0.25, 0.65], lDir = [0.7, -0.25, 0.65];
+      if (anim === 'attack') {
+        rHand = [[-0.4, 3.2, 13.6], [4.2, 1.4, 8.4], [3.0, -0.8, 6.2]][f];
+        lHand = [[0.4, -3.0, 12.2], [3.0, -2.6, 13.0], [4.4, -0.6, 8.6]][f];
+        rDir = [[-0.3, 0.3, 0.9], [0.85, -0.3, -0.4], [0.35, -0.7, -0.6]][f];
+        lDir = [[-0.2, -0.3, 0.92], [-0.1, -0.2, 0.97], [0.85, 0.3, -0.4]][f];
+      }
+      const hu = humanoid({ phase: ph, run: true, gear: 'wild', torso: M.skin, arms: M.skin, legs: M.team, rHand, lHand });
+      berserkGear(hu.P, hu.bob);
+      axe(hu.P, rHand, rDir);
+      axe(hu.P, lHand, lDir);
+      return hu.P;
+    },
+
+    crossbow(anim, f) {
+      if (anim === 'flee') {
+        const [r, l] = RAISED(0.3);
+        return humanoid({ phase: PH(f), run: true, gear: 'kettle', belt: true, rHand: r, lHand: l }).P;
+      }
+      const ph = anim === 'walk' ? PH(f) : null;
+      const swing = ph == null ? 0 : Math.sin(ph);
+      let rHand, lHand, fwd, spanned = true;
+      if (anim === 'aim' || anim === 'release') { rHand = [0.9, 1.5, 10.6]; lHand = [4.4, 0.4, 10.3]; fwd = [1, -0.08, 0.02]; spanned = anim === 'aim'; }
+      else if (anim === 'reload') { rHand = [1.6, 1.2, 8.6]; lHand = [1.9, -1.0, 9.2]; fwd = [0.55, 0.05, -0.83]; spanned = false; }
+      else if (anim === 'attack') { rHand = [[-0.6, 3.5, 12.4], [3.8, 1.0, 8.6], [2.4, -1.6, 6.6]][f]; lHand = [1.6, -3.0, 7.0]; fwd = null; }
+      else { rHand = [1.7 - swing * 0.6, 2.4, 8.0]; lHand = [2.6 + swing * 0.4, -0.6, 9.4]; fwd = [0.5, -0.15, 0.85]; }
+      const hu = humanoid({ phase: ph, gear: 'kettle', belt: true, rHand, lHand });
+      const P = hu.P, b = hu.bob;
+      P.push(C([-2.3, -1.6, 6.2 + b], [-2.5, -1.6, 9.4 + b], 0.9, 0.8, M.leather));        // bolt case
+      P.push(E([-2.4, 0.4, 9.6 + b], [0.45, 2.6, 3.0], M.team));                          // pavise on the back
+      P.push(E([-2.7, 0.4, 9.6 + b], [0.3, 2.3, 2.7], M.trim));
+      if (fwd) crossbow(P, [rHand[0], rHand[1], rHand[2] + b], fwd, spanned);
+      else {
+        sword(P, rHand, [[-0.35, 0.35, 0.87], [0.8, -0.5, -0.3], [0.3, -0.82, -0.48]][f]);
+        crossbow(P, [-1.8, 2.6, 7.0 + b], [-0.2, 0.15, 1], false);
+      }
+      return P;
+    },
+
+    horsearcher(anim, f) {
+      const gallop = anim === 'walk';
+      const ph = gallop ? PH(f) : null;
+      const bob = ph == null ? 0 : Math.sin(ph * 2) * 0.4;
+      const H = horse(ph, bob, false);
+      const Rr = [], sb = bob;
+      riderLegs(Rr, sb, M.leather);
+      Rr.push(E([-0.7, 0, 14.0 + sb], [2.0, 2.6, 2.8], M.team));
+      Rr.push(E([-0.7, 0, 12.2 + sb], [2.1, 2.7, 0.55], M.leather));
+      const hd = [-0.4, 0, 17.6 + sb];
+      Rr.push(S(hd, 2.2, M.skin));
+      for (const sd of [-1, 1]) Rr.push(S([hd[0] + 1.95, sd * 0.8, hd[2] - 0.1], 0.4, M.eye));
+      Rr.push(E([hd[0] - 0.1, 0, hd[2] + 0.9], [2.45, 2.45, 0.55], M.mane));               // fur rim
+      Rr.push(C([hd[0] - 0.2, 0, hd[2] + 1.0], [hd[0] - 0.9, 0, hd[2] + 4.4], 2.1, 0.35, M.team)); // pointed cap
+      let rHand, lHand, pull = null, arrow = false;
+      const up = norm([0.15, -0.1, 1]);
+      if (anim === 'aim') { lHand = [4.6, -1.0, 15.0 + sb]; rHand = [0.6, 0.4, 15.4 + sb]; pull = rHand; arrow = true; }
+      else if (anim === 'release') { lHand = [4.6, -1.0, 15.0 + sb]; rHand = [-0.6, 1.6, 15.6 + sb]; }
+      else if (anim === 'attack') { lHand = [1.4, -2.2, 13.0 + sb]; rHand = [[-0.4, 3.2, 18.0], [4.2, 1.6, 14.2], [3.4, -0.6, 12.4]][f].map((v, i) => (i === 2 ? v + sb : v)); }
+      else { lHand = [2.2, -2.4, 13.2 + sb]; rHand = [1.2, 2.6, 13.0 + sb]; }
+      for (const [sd, hand] of [[1, rHand], [-1, lHand]]) {
+        Rr.push(C([-0.7, sd * 2.7, 15.6 + sb], hand, 0.95, 0.8, M.teamDark));
+        Rr.push(S(hand, 0.85, M.skin));
+      }
+      if (anim === 'aim' || anim === 'release') bow(Rr, lHand, up, [1, 0, 0], pull, arrow);
+      else bow(Rr, lHand, norm([0.35, -0.25, 1]), norm([0.8, -0.6, 0]), null, false);
+      if (anim === 'attack') sword(Rr, rHand, [[-0.35, 0.35, 0.87], [0.8, -0.5, -0.3], [0.3, -0.82, -0.48]][f]);
+      Rr.push(C([-2.4, -2.6, 11.4 + sb], [-3.4, -2.8, 13.8 + sb], 0.9, 0.8, M.leather));     // quiver
+      return mounted(H, Rr);
+    },
+
+    general(anim, f) {
+      const gallop = anim === 'walk';
+      const ph = gallop ? PH(f) : null;
+      const bob = ph == null ? 0 : Math.sin(ph * 2) * 0.4;
+      const H = horse(ph, bob, true);
+      H.push(E([-0.2, 0, 10.6 + bob], [5.0, 3.4, 0.4], M.trim));                            // gilded saddle
+      const Rr = [], sb = bob;
+      riderLegs(Rr, sb, M.steel);
+      Rr.push(E([-0.7, 0, 14.2 + sb], [2.1, 2.8, 2.9], M.trim));
+      Rr.push(E([-0.6, 0, 14.4 + sb], [1.9, 2.9, 1.6], M.team));
+      Rr.push(E([-0.7, 0, 12.2 + sb], [2.2, 2.85, 0.6], M.leather));
+      for (const sd of [-1, 1]) Rr.push(S([-0.7, sd * 2.9, 16.1 + sb], 1.15, M.trim));
+      Rr.push(E([-3.4, 0, 12.4 + sb], [1.0, 3.4, 4.8], M.team, { R: rotY(0.35) }));         // cloak
+      const hd = [-0.45, 0, 18.0 + sb];
+      headgear('greathelm', hd, Rr);
+      for (const a of [0, 1.26, 2.51, 3.77, 5.03]) {                                         // crown
+        const cx = hd[0] + Math.cos(a) * 2.2, cy = Math.sin(a) * 2.2;
+        Rr.push(C([cx, cy, hd[2] + 1.6], [cx, cy, hd[2] + 3.1], 0.45, 0.2, M.trim));
+      }
+      let rHand = [1.6, 3.2, 17.4 + sb], sdir = [0.35, 0.1, 0.93];
+      if (gallop) { rHand = [2.4, 2.8, 18.6 + sb]; sdir = [0.75, -0.05, 0.66]; }
+      if (anim === 'attack') {
+        rHand = [[-0.6, 3.2, 19.6], [4.4, 1.2, 15.4], [3.2, -1.4, 12.8]][f].map((v, i) => (i === 2 ? v + sb : v));
+        sdir = [[-0.35, 0.35, 0.87], [0.8, -0.5, -0.3], [0.3, -0.82, -0.48]][f];
+      }
+      const lHand = [1.6, -1.6, 12.8 + sb];
+      for (const [sd, hand] of [[1, rHand], [-1, lHand]]) {
+        Rr.push(C([-0.7, sd * 3.0, 15.8 + sb], hand, 1.0, 0.85, M.teamDark));
+        Rr.push(S(hand, 0.9, M.steel));
+      }
+      sword(Rr, rHand, sdir);
+      return mounted(H, Rr);
+    },
+
 
     giant(anim, f) {
       const ph = anim === 'walk' ? PH(f) : null;
@@ -581,11 +758,19 @@
     },
   };
 
-  // Death = idle pose falling over (knights: horse rolls over, rider is thrown).
+  // fur over the shoulders and a team-coloured sash for the berserker
+  function berserkGear(P, b) {
+    P.push(E([-0.9, 0, 10.3 + b], [1.6, 3.2, 1.1], M.mane));
+    for (const sd of [-1, 1]) P.push(S([-0.3, sd * 3.0, 10.3 + b], 1.15, M.mane));
+    P.push(C([1.9, -2.6, 10.0 + b], [2.1, 2.5, 6.6 + b], 0.6, 0.6, M.team));
+  }
+
+  // Death = idle pose falling over (horsemen: the horse rolls over, the rider is thrown).
+  const MOUNTED = { knight: 1, horsearcher: 1, general: 1 };
   function deathModel(cls, f) {
     const k = [0.38, 0.75, 1][f];
-    if (cls === 'knight') {
-      const P = MODELS.knight('idle', 0);
+    if (MOUNTED[cls]) {
+      const P = MODELS[cls]('idle', 0);
       const a = k * Math.PI / 2;
       for (const p of P) {
         if (p.g === 'horse') p.xf = { m: rotX(-a), p: [0, 0, 0], t: [0, 0, 3.3 * Math.sin(a)] };
@@ -616,6 +801,10 @@
     archer: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
     knight: [['idle', 1], ['walk', 4], ['ready', 1], ['charge', 4], ['attack', 3], ['death', 3]],
     giant: [['idle', 1], ['walk', 4], ['attack', 3], ['death', 3]],
+    berserk: [['idle', 1], ['walk', 4], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
+    crossbow: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['reload', 1], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
+    horsearcher: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['attack', 3], ['death', 3]],
+    general: [['idle', 1], ['walk', 4], ['attack', 3], ['death', 3]],
   };
 
   // ------------------------------------------------------------------ atlas building
@@ -651,6 +840,10 @@
     archer: ['.##.#', '#..##', '#..#.', '#..##', '.##.#'],
     knight: ['.###.', '#...#', '#...#', '#...#', '##.##'],
     giant: ['.###.', '#####', '#.#.#', '#####', '.#.#.'],
+    berserk: ['#...#', '##.##', '.###.', '..#..', '..#..'],
+    crossbow: ['#####', '..#..', '.###.', '..#..', '..#..'],
+    horsearcher: ['.#..#', '#.#.#', '#..##', '#.#.#', '.#..#'],
+    general: ['#.#.#', '#####', '#####', '.....', '#####'],
   };
   const BANNER = { W: 16, H: 28, CW: 12, CH: 8, TOP: 2, AX: 1 }; // AX: pole column; anchor = pole foot
   function makeBanner(team, type, f) {
@@ -750,7 +943,7 @@
 
       // Pose every frame once (model space), reuse for all scales & directions.
       const poses = {};
-      for (const cls of TM.UNIT_ORDER) {
+      for (const cls of TM.ALL_TYPES) {
         poses[cls] = {};
         for (const [anim, n] of ANIMS[cls]) {
           poses[cls][anim] = [];
@@ -764,7 +957,7 @@
         const frames = [];
         const meta = {};
         const clouds = {};
-        for (const cls of TM.UNIT_ORDER) {
+        for (const cls of TM.ALL_TYPES) {
           meta[cls] = {};
           const big = cls === 'giant' ? 1.25 : 1;
           clouds[cls] = {};
@@ -801,7 +994,7 @@
         if (si === 0) {
           // corpse variants (last death frame) for baking into the ground layer
           const cf = [], cmeta = {};
-          for (const cls of TM.UNIT_ORDER) {
+          for (const cls of TM.ALL_TYPES) {
             cmeta[cls] = [];
             for (let d = 0; d < nd; d++) {
               const r = raster(clouds[cls].death[2], d * Math.PI * 2 / nd, s);
@@ -955,7 +1148,7 @@
       // (banners: in the scene; bannerMarks: with a dark halo, for medium and far zoom)
       this.banners = [{}, {}]; this.bannerMarks = [{}, {}];
       for (let team = 0; team < 2; team++) {
-        for (const type of TM.UNIT_ORDER) {
+        for (const type of TM.ALL_TYPES) {
           const fr = [0, 1, 2, 3].map((f) => makeBanner(team, type, f));
           this.banners[team][type] = fr.map((v) => v[0]);
           this.bannerMarks[team][type] = fr.map((v) => v[1]);
