@@ -8,7 +8,7 @@
   const R = Math.random;
   const gauss = () => (R() + R() + R() - 1.5) * 0.8165;
 
-  const P_BLOOD = 0, P_SPARK = 1, P_DUST = 2, P_SPLINTER = 3;
+  const P_BLOOD = 0, P_SPARK = 1, P_DUST = 2, P_SPLINTER = 3, P_BREATH = 4;
 
   function makeCanvas(w, h) {
     const c = document.createElement('canvas');
@@ -175,6 +175,14 @@
       for (const Rg of T.regs) {
         if (Rg.alive === 0) continue;
         // a regiment crashing into the enemy (engaged on at 15 % of its men, off below 5 %)
+        // spent men pant: a little puff of breath now and then
+        if (Rg.sta < 0.35 && Rg.role !== 'monster') {
+          for (const u of Rg.members) {
+            if (u.state !== 0 || u.sta > 0.25 || R() > dt * 0.7) continue;
+            const hh = u.type === 'knight' ? 15 : 12;
+            this.spawn(P_BREATH, u.x + Math.cos(u.facing) * 3, u.y + Math.sin(u.facing) * 2, hh, Math.cos(u.facing) * 8, Math.sin(u.facing) * 5, 7, 0.5, 1);
+          }
+        }
         const was = this.engSeen.get(Rg) || false;
         const eng = !Rg.routing && (was ? Rg.engaged > 0.05 : Rg.engaged > 0.15);
         if (eng && !was) this.clash(B, Rg);
@@ -271,7 +279,7 @@
       for (let i = 0; i < this.n; i++) {
         this.life[i] -= dt;
         const t = this.type[i];
-        if (t === P_DUST) {
+        if (t === P_DUST || t === P_BREATH) {   // drifting puffs: no gravity
           this.vx[i] *= decay; this.vy[i] *= decay;
           this.px[i] += this.vx[i] * dt; this.py[i] += this.vy[i] * dt;
           this.pz[i] += this.vz[i] * dt;

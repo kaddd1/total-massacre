@@ -7,7 +7,40 @@
 
   const ALIVE = 0, DYING = 1, DEAD = 2, ESCAPED = 3;
   const MORALE_R = 90;
+  const TERROR_R = 95;     // a giant frightens the men within this distance (more the closer it is)
   const buf = [];
+
+  // ---------------- stamina ----------------
+  // 1 = fresh, 0 = spent. Running flat out (faster than a formation's marching pace), fleeing and
+  // every blow cost breath; walking and standing give it back, slowly while the enemy is close.
+  // Below half, a tired man is slower and strikes less often (at worst 70% of his speed and a third
+  // slower blows): he never stops, but he can no longer outrun pursuit or kite for ever.
+  const SPRINT = 0.92;     // fraction of one's own top speed above which running costs breath
+  function tiredness(u) { const f = u.sta >= 0.5 ? 1 : u.sta / 0.5; return f; }
+  function speedK(u) { return 0.7 + 0.3 * tiredness(u); }
+  function breathe(u, B, sp, dt) {
+    const d = u.def, top = d.speed * u.speedMul, R = u.reg;
+    let s = sp / top;
+    // in his place in the ranks a man goes at the pace of his regiment: the small corrections that
+    // keep the ranks dressed are not a run
+    if (s > 0.6 && R && !u.fleeing && R.role !== 'cavalry') {
+      const dx = u.x - (R.ax + R.cos * u.sdep - R.sin * u.slat), dy = u.y - (R.ay + R.sin * u.sdep + R.cos * u.slat);
+      if (dx * dx + dy * dy < 144) { const rs = Math.sqrt(R.vx * R.vx + R.vy * R.vy) / top; if (rs < s) s = rs; }
+    }
+    let e = s > SPRINT ? Math.min(u.fleeing ? 0.6 : 1.2, (s - SPRINT) / (1 - SPRINT)) : 0;  // a man running for his life paces himself a little
+    // a skirmish run back is flat out for the whole regiment, a charge half that
+    const o = R && !u.fleeing && s > 0.6 ? R.order : '';
+    if (o === 'fallback') e = Math.max(e, 1); else if (o === 'charge') e = Math.max(e, 0.35);
+    if (e > 0) {
+      u.sta -= e * dt / (6.5 * d.endurance);
+    } else {
+      // standing still out of danger he gets his breath back in ~20 s; with the enemy close only slowly
+      const pressed = u.nearEnemyD < 150 || B.time - u.contactT < 1;
+      const rate = s < 0.4 ? (pressed ? 1 / 60 : 1 / 18) : (pressed ? 1 / 120 : 1 / 40);
+      u.sta += rate * d.recovery * dt;
+    }
+    if (u.sta > 1) u.sta = 1; else if (u.sta < 0) u.sta = 0;
+  }
 
   function create(id, team, type, x, y) {
     const d = TM.UNIT_TYPES[type];
@@ -33,6 +66,9 @@
       blockT: -9, // when a shield last caught an arrow (read by the renderer only)
       // regiment membership (set by TM.Tactics.build)
       reg: null, slot: 0, sdep: 0, slat: 0, rank: 0, contactT: -9, volleyAt: 0, volleyTarget: null,
+      sta: 1,                  // stamina (see breathe)
+      shock: 0, seen: 0,       // fright from comrades dying around, still to sink in; deaths witnessed
+      facedT: 0,               // seconds spent face to face with a terror (one gets used even to giants)
     };
   }
 
@@ -65,7 +101,9 @@
       if (d2 < m2) {
         enemies += o.fleeing ? 0.3 : (o.def.fearless ? 4 : o.type === 'knight' ? 2 : 1);
         ex += o.x; ey += o.y; ec++;
-        if (o.def.terror && d2 < 4900) terror += o.def.terror;
+      }
+      if (o.def.terror && d2 < TERROR_R * TERROR_R) {
+        terror += o.def.terror * (1 - Math.sqrt(d2) / TERROR_R * 0.6) * (0.35 + 0.65 * o.hp / o.maxHp);
       }
       if (d2 < nearD2) { nearD2 = d2; near = o; }
       if (u.fleeing) continue;
@@ -90,6 +128,14 @@
     // ----- morale -----
     if (B.opts.morale && !d.fearless) {
       let dm = 0;
+      // the death of comrades sinks in over a few seconds instead of all at once: a massacre around
+      // a man wears him down steadily (at most ~5 points a second) rather than in one blow. Nothing is
+      // forgotten, it only takes time, and in that time the men can still turn the fight (a fallen
+      // giant lifts the dread, battle.js)
+      if (u.shock > 0.01) {
+        const take = Math.min(u.shock, 5 * el + 0.4);
+        u.morale -= take; u.shock -= take;
+      }
       const lossR = B.lossRatio(u.team);
       if (enemies === 0) dm += u.fleeing ? (lossR > 0.6 ? 1 : 3) : 6;
       else if (enemies > allies + 1) dm -= (enemies - allies - 1) * 1.3;
@@ -97,7 +143,13 @@
       const hpR = u.hp / u.maxHp;
       if (hpR < 0.35) dm -= (0.35 - hpR) * 25;
       dm -= Math.min(fleeingAllies, 6) * 1.2;
-      dm -= terror;
+      if (terror > 0) {
+        // shoulder to shoulder in a formed regiment the monster is faced, not fled; and after a
+        // while face to face with it, one learns that it bleeds too
+        u.facedT += el;
+        const ranks = R && R.discipline && !R.routing && allies >= 8 ? 0.6 : 1;
+        dm -= terror * ranks / (1 + u.facedT / 15);
+      }
       if (lossR > 0.55) dm -= (lossR - 0.55) * 22;
       if (R) {
         if (R.routing) dm -= 7;                                   // the regiment is running
@@ -108,7 +160,8 @@
           if (R.strength < 0.5) dm -= (0.5 - R.strength) * 8;     // the regiment is melting away
         }
       }
-      dm *= dm < 0 ? 1 / u.bravery : u.bravery;
+      // a man out of breath takes heart more slowly
+      dm *= dm < 0 ? 1 / u.bravery : u.bravery * (0.6 + 0.4 * tiredness(u));
       u.morale = U.clamp(u.morale + dm * el, 0, 100);
 
       if (!u.fleeing && u.morale < 14) {
@@ -141,7 +194,8 @@
     // ----- targeting -----
     if (R && d.ranged) {
       // a cornered archer draws his dagger; otherwise he aims where his regiment shoots
-      u.target = near && Math.sqrt(nearD2) - u.r - near.r < d.reach + 3 ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
+      const nd = near ? Math.sqrt(nearD2) - u.r - near.r : 1e9;
+      u.target = near && (nd < d.reach + 3 || (R.order === 'stand' && nd < 22)) ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
       // contact = an enemy within shooting range (the march drums and the HUD stage go by it)
       if (u.target && Math.hypot(u.target.x - u.x, u.target.y - u.y) < d.ranged.range + 30) B.contact[u.team] = true;
       return;
@@ -193,7 +247,7 @@
     u.desX = 0; u.desY = 0;
     if (u.z > 0.5 || u.stunT > 0) return;
 
-    const speed = d.speed * u.speedMul;
+    const speed = d.speed * u.speedMul * speedK(u);
 
     if (u.fleeing) {
       u.desX = u.fleeX * speed * 1.1;
@@ -270,7 +324,10 @@
         mx += -ny * u.flankBias * 0.6; my += nx * u.flankBias * 0.6;
         const l = Math.hypot(mx, my); mx /= l; my /= l;
       }
-      u.desX = mx * speed; u.desY = my * speed;
+      // stepping up to the next foe is a quick walk, not a sprint (saves breath for a long fight);
+      // only a man left far behind runs
+      const pace = gap > 40 ? 1 : 0.88;
+      u.desX = mx * speed * pace; u.desY = my * speed * pace;
       u.faceTo = Math.atan2(u.desY, u.desX);
       if (u.atkT < 0) u.engagedT = Math.max(0, u.engagedT - dt);
     } else {
@@ -291,6 +348,8 @@
     const d = u.def, r = d.ranged;
     const ne = u.nearEnemy;
     const neD = ne && ne.state === ALIVE ? Math.hypot(ne.x - u.x, ne.y - u.y) - u.r - ne.r : 1e9;
+    // the regiment makes a stand: the men the enemy reached fight hand to hand
+    if (R.order === 'stand' && t && t === ne && neD < 22) return melee(u, B, t, speed, 0);
     if (neD <= d.reach + 1) {
       // cornered: stab with a dagger, still trying to slip away
       const ex = ne.x - u.x, ey = ne.y - u.y, l = Math.hypot(ex, ey) || 1;
@@ -310,6 +369,7 @@
           u.faceTo = Math.atan2(T.y - u.y, T.x - u.x);
           B.fireArrow(u, T, dist);
           u.rangedCd = r.cooldown * U.range(0.88, 0.98); // ready again for the next volley
+          u.sta = Math.max(0, u.sta - 0.012);            // drawing a war bow is work too
           u.shotT = 0;
         }
       }
@@ -346,10 +406,11 @@
     u.atkT = 0;
     u.atkDone = false;
     u.atkTarget = t;
-    u.atkCd = d.cooldown * U.range(0.85, 1.2);
+    u.atkCd = d.cooldown * U.range(0.85, 1.2) * (1 + 0.35 * (1 - tiredness(u)));  // tired arms strike slower
+    u.sta = Math.max(0, u.sta - 0.02 / d.endurance);
     // enemy got inside the spear's reach: clumsy
     if (u.type === 'spear' && gap < d.reach * 0.3) u.atkCd *= 1.3;
   }
 
-  TM.Units = { create, update, think, ALIVE, DYING, DEAD, ESCAPED };
+  TM.Units = { create, update, think, breathe, speedK, tiredness, ALIVE, DYING, DEAD, ESCAPED };
 })(window.TM = window.TM || {});

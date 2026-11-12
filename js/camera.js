@@ -199,7 +199,7 @@
 
     hotSpot(B) {
       // 1) a fresh event worth a close look
-      const PRIO = { rear: 5, giant: 5, rout: 4, break: 3, brace: 3, blood: 3, hero: 2, flank: 2 };
+      const PRIO = { rear: 5, giant: 5, rout: 4, stand: 4, break: 3, brace: 3, blood: 3, hero: 2, flank: 2 };
       let best = null, bp = 0;
       for (let i = B.events.length - 1; i >= 0; i--) {
         const e = B.events[i];

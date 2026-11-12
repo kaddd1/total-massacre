@@ -83,6 +83,7 @@
     rout: ['#ffb347', 70, 2.6], break: ['#ffb347', 130, 3], rear: ['#ff6a4a', 55, 2.2], flank: [null, 45, 1.8],
     brace: ['#efe9d8', 45, 1.8], reserve: [null, 55, 2], volley: ['#ffd34d', 35, 1.3], rally: ['#8fe060', 50, 2.2],
     giant: ['#ffd34d', 80, 2.6], blood: ['#ff6a4a', 35, 1.6], hero: ['#ffffff', 30, 1.6], win: [null, 150, 3.2],
+    stand: ['#ffb347', 45, 1.8], giveup: [null, 40, 1.6],
   };
 
   // a ground ring (seen in the 3/4 view: flattened) stroked one art pixel wide
@@ -509,6 +510,16 @@
       for (let i = 0; i < cnt; i++) {
         if (type[i] !== 1) continue;
         ctx.fillRect(Math.round(px[i] * D + ox), Math.round((py[i] - pz[i] * K) * D + oy), n, n);
+      }
+      // breath of exhausted men (close up only)
+      if (D >= 1.2) {
+        ctx.fillStyle = '#ece8dc';
+        for (let i = 0; i < cnt; i++) {
+          if (type[i] !== 4) continue;
+          ctx.globalAlpha = life[i] / maxLife[i] * 0.6;
+          ctx.fillRect(Math.round(px[i] * D + ox), Math.round((py[i] - pz[i] * K) * D + oy), n, n);
+        }
+        ctx.globalAlpha = 1;
       }
       ctx.fillStyle = '#8b5e31';
       for (let i = 0; i < cnt; i++) {

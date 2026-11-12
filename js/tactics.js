@@ -83,6 +83,8 @@
       this.flankHits = 0; this.volleyT = 0; this.phaseT = 0; this.lostTenths = 0;
       this.lx = 1; this.ly = 0; this.lanceT = 3; this.committed = false; this.shockT = -99;
       this.compactCount = -1; this.supportOf = null; this.supOff = null;
+      this.sta = 1; this.winded = false;              // mean stamina of the men in the ranks; out of breath
+      this.chaseE = null; this.chaseGap = 0; this.chaseT = 0; this.shunE = null; this.shunUntil = 0;
     }
 
     setSlot(u, i) { const s = this.slots[i]; u.slot = i; u.sdep = s.dep; u.slat = s.lat; u.rank = s.rank; }
@@ -116,12 +118,12 @@
 
     // summary of the regiment state, recomputed every decision
     survey(B) {
-      let cx = 0, cy = 0, n = 0, alive = 0, flee = 0, lag = 0, eng = 0, front = -Infinity, back = Infinity, halfW = 0, fx = 0, fy = 0;
+      let cx = 0, cy = 0, n = 0, alive = 0, flee = 0, lag = 0, eng = 0, front = -Infinity, back = Infinity, halfW = 0, fx = 0, fy = 0, sta = 0;
       for (const u of this.members) {
         if (u.state !== ALIVE) continue;
         alive++;
         if (u.fleeing) { flee++; fx += u.x; fy += u.y; continue; }
-        n++; cx += u.x; cy += u.y;
+        n++; cx += u.x; cy += u.y; sta += u.sta;
         lag += Math.hypot(u.x - this.slotX(u), u.y - this.slotY(u));
         if (B.time - u.contactT < 0.6) eng++;
         if (u.sdep > front) front = u.sdep;
@@ -132,7 +134,7 @@
       if (flee) { this.fcx = fx / flee; this.fcy = fy / flee; }
       this.strength = alive / this.n0;
       if (n) {
-        this.cx = cx / n; this.cy = cy / n; this.lag = lag / n; this.engaged = eng / n;
+        this.cx = cx / n; this.cy = cy / n; this.lag = lag / n; this.engaged = eng / n; this.sta = sta / n;
         this.front = front + this.spacing / 2; this.back = back - this.spacing / 2; this.halfW = halfW + this.spacing / 2;
         this.radius = Math.hypot(this.halfW, (this.front - this.back) / 2);
       } else { this.engaged = 0; this.lag = 0; }
@@ -145,7 +147,7 @@
 
     // anchor motion, every simulation tick
     move(dt) {
-      let sp = this.speed;
+      let sp = this.speed * (0.7 + 0.3 * Math.min(1, this.sta / 0.5));   // a tired regiment moves slower
       if (sp > 0 && this.role !== 'cavalry') {
         // don't run away from the men: a stretched formation waits for its ranks
         if (this.lag > 42) sp = 0; else if (this.lag > 22) sp *= 0.45;
@@ -191,6 +193,40 @@
     // is regiment K moving towards R?
     const dx = R.cx - K.cx, dy = R.cy - K.cy, l = Math.hypot(dx, dy) || 1;
     return (K.vx * dx + K.vy * dy) / l > K.maxSpeed * 0.35 || (K.pTarget === R && (K.pOrder === 'charge' || K.pOrder === 'lance'));
+  }
+
+  // A point about `len` away roughly in direction (dx, dy) that has room around it: never into the
+  // map edge or a corner, never into another enemy regiment, and still away from the threat at
+  // (tx, ty). The way is tried straight, then turning more and more to either side (sliding along a
+  // wall). null: there is no way out.
+  function openGoal(x, y, dx, dy, len, tx, ty, foes) {
+    const C = TM.CONFIG, base = Math.atan2(dy, dx);
+    let best = null, bs = -Infinity;
+    for (const off of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8]) {
+      const a = base + off;
+      const gx = U.clamp(x + Math.cos(a) * len, 25, C.WORLD_W - 25), gy = U.clamp(y + Math.sin(a) * len, 25, C.WORLD_H - 25);
+      if (dist(x, y, gx, gy) < len * 0.45) continue;                  // a wall that way
+      const gain = dist(gx, gy, tx, ty) - dist(x, y, tx, ty);
+      if (gain < len * 0.2) continue;                                 // that only goes round the enemy
+      const room = Math.min(gx, gy, C.WORLD_W - gx, C.WORLD_H - gy);
+      let s = Math.cos(off) + Math.min(room, 220) / 220 * 1.3 + gain / len * 0.8;
+      for (const F of foes) if (F.active() && dist(F.cx, F.cy, gx, gy) < F.radius + 70) s -= 1.5;
+      if (s > bs) { bs = s; best = { x: gx, y: gy }; }
+    }
+    return best;
+  }
+
+  // behind the nearest formed friendly foot regiment, seen from the threat: where hunted archers run
+  function coverPoint(R, friends, threat) {
+    let best = null, bd = 520;
+    for (const F of friends) {
+      if (F === R || !F.active() || F.role === 'missile' || F.role === 'cavalry' || !F.discipline) continue;
+      const ax = F.cx - threat.cx, ay = F.cy - threat.cy, al = Math.hypot(ax, ay) || 1;
+      const px = F.cx + ax / al * (F.radius + 45), py = F.cy + ay / al * (F.radius + 45);
+      const d = dist(R.cx, R.cy, px, py);
+      if (d < bd) { bd = d; best = { x: px, y: py }; }
+    }
+    return best;
   }
 
   // ---------------------------------------------------------------- army command
@@ -265,6 +301,7 @@
       // battle line off to the edges of the field.
       if (E.role === 'cavalry' && !(E.engaged > 0.25 && d < 120)) s += R.type === 'spear' ? 320 : 400;
       if (R.doctrine === 'spearhead') s += dist(E.cx, E.cy, T.gen[R.team].ecx, T.gen[R.team].ecy) * 0.8; // drive into the centre
+      if (E === R.shunE && B.time < R.shunUntil) s += 450;   // a chase that led nowhere
       return s;
     };
   }
@@ -306,6 +343,17 @@
     }
     const horde = R.discipline === 0, monster = R.role === 'monster';
     const chargeAt = horde ? 130 : monster ? 120 : 70;
+    // pursuit: an enemy that keeps out of reach for long (archers skirmishing back) is left alone for
+    // a while if there is anything else to fight; with nothing else, the chase goes on
+    if (R.engaged < 0.1 && R.pOrder !== 'hold' && R.pOrder !== 'brace' && R.pOrder !== 'support') {
+      if (R.chaseE !== tgt) { R.chaseE = tgt; R.chaseGap = gap; R.chaseT = 0; }
+      else if (gap < R.chaseGap - 20) { R.chaseGap = gap; R.chaseT = 0; }
+      else R.chaseT += THINK;
+      if (R.chaseT > 8 && foes.length > 1) {
+        R.shunE = tgt; R.shunUntil = B.time + 12; R.chaseT = 0; R.chaseE = null;
+        if (R.alive >= 4) tacticalEvent(B, R, 'giveup', `${TM.TEAMS[R.team].name}: ${R.name} бросают погоню`);
+      }
+    } else R.chaseE = null;
     if (G.stance === 'defend' && gap > 170 && R.engaged < 0.1 && !horde) {
       R.setOrder('hold'); R.stop(); R.face(tgt.cx, tgt.cy);
       return;
@@ -342,21 +390,34 @@
       const d = gapTo(R, E);
       if (d < td) { td = d; threat = E; }
     }
-    const C = TM.CONFIG;
     const backing = R.order === 'fallback' && R.orderT < 2.2;
-    if (threat && R.engaged < 0.35 && (td < 75 || (backing && td < 120))) {
-      const ax = R.cx - threat.cx, ay = R.cy - threat.cy, al = Math.hypot(ax, ay) || 1;
-      // away from the threat, leaning towards our own side of the field
-      let dx = ax / al - G.axX * 0.6, dy = ay / al - G.axY * 0.6;
-      const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-      const gx = U.clamp(R.cx + dx * 130, 20, C.WORLD_W - 20), gy = U.clamp(R.cy + dy * 130, 20, C.WORLD_H - 20);
-      if (dist(R.cx, R.cy, gx, gy) > 40) {   // nowhere to go (map edge): stand and shoot
-        R.setOrder('fallback'); R.go(gx, gy, R.def.speed);
-        R.goalAngle = Math.atan2(-ay, -ax);
+    if (R.sta < 0.2) R.winded = true; else if (R.sta > 0.45) R.winded = false;
+    if (threat && (td < 75 || (backing && td < 120) || (R.order === 'stand' && td < 60))) {
+      // skirmish back: away from the threat, towards the cover of our own foot, never into a wall.
+      // Each run costs breath (units.js): spent men, men already locked in a fight, or men with no
+      // way out turn and fight it out with their daggers instead.
+      const caught = R.engaged > 0.35 || td < 10;
+      // men who ran themselves out stay and fight until they have their breath back
+      const spent = R.winded;
+      let goal = null;
+      if (!caught && !spent) {
+        const ax = R.cx - threat.cx, ay = R.cy - threat.cy, al = Math.hypot(ax, ay) || 1;
+        let dx = ax / al, dy = ay / al;
+        const cov = coverPoint(R, friends, threat);
+        if (cov) { const cl = dist(R.cx, R.cy, cov.x, cov.y) || 1; dx += (cov.x - R.cx) / cl * 0.9; dy += (cov.y - R.cy) / cl * 0.9; }
+        else { dx -= G.axX * 0.5; dy -= G.axY * 0.5; }
+        goal = openGoal(R.cx, R.cy, dx, dy, 130, threat.cx, threat.cy, foes);
+      }
+      if (goal) {
+        R.setOrder('fallback'); R.go(goal.x, goal.y, R.def.speed);
+        R.goalAngle = Math.atan2(goal.y - R.cy, goal.x - R.cx);
         R.target = threat; R.aim = null;
         return;
       }
+      if (R.order !== 'stand' && R.n >= 5) tacticalEvent(B, R, 'stand', `${TM.TEAMS[R.team].name}: ${R.name} отбиваются в ближнем бою`);
+      R.setOrder('stand'); R.stop(); R.face(threat.cx, threat.cy);
     }
+    const standing = R.order === 'stand' && threat && td < 60;
     // choose what to shoot: an enemy coming at us > enemy archers > melee in progress (rear ranks)
     let best = null, bs = Infinity;
     for (const E of foes) {
@@ -375,6 +436,12 @@
     const nr = best.nearest(R.cx, R.cy);
     R.aim = nr ? nr.u : null;
     const d = gapTo(R, best);
+    if (standing) {
+      // the men the enemy reached fight with daggers (units.js); everybody else keeps shooting
+      R.volleyT -= THINK;
+      if (R.volleyT <= 0) volley(R, B, best);
+      return;
+    }
     R.face(best.cx, best.cy);
     // never walk out in front of our own battle line
     const hasLine = friends.some((F) => (F.role === 'front' || F.role === 'support') && F.active());
@@ -516,8 +583,10 @@
       // break off: ride back towards our own side
       const bx = R.cx - (E ? E.cx - R.cx : G.axX * 100), by = R.cy - (E ? E.cy - R.cy : G.axY * 100), bl = Math.hypot(bx - R.cx, by - R.cy) || 1;
       R.setOrder('withdraw'); R.phaseT = 0;
-      const gx = R.cx + (bx - R.cx) / bl * 200 - G.axX * 60, gy = R.cy + (by - R.cy) / bl * 200 - G.axY * 60;
-      R.go(U.clamp(gx, 40, TM.CONFIG.WORLD_W - 40), U.clamp(gy, 40, TM.CONFIG.WORLD_H - 40), R.maxSpeed);
+      let gx = R.cx + (bx - R.cx) / bl * 200 - G.axX * 60, gy = R.cy + (by - R.cy) / bl * 200 - G.axY * 60;
+      const W = openGoal(R.cx, R.cy, gx - R.cx, gy - R.cy, 200, E ? E.cx : R.cx + G.axX * 100, E ? E.cy : R.cy + G.axY * 100, foes);
+      if (W) { gx = W.x; gy = W.y; } else { gx = U.clamp(gx, 40, TM.CONFIG.WORLD_W - 40); gy = U.clamp(gy, 40, TM.CONFIG.WORLD_H - 40); }
+      R.go(gx, gy, R.maxSpeed);
       R.goalAngle = Math.atan2(gy - R.cy, gx - R.cx);
       return;
     }
@@ -735,6 +804,7 @@
       hold: 'держат строй', advance: 'наступают', charge: 'в атаку', engage: 'сеча', brace: 'копья вперёд',
       support: 'резерв', shoot: 'залп', fallback: 'отходят', screen: 'прикрывают фланг', flank: 'обход',
       approach: 'сближение', lance: 'таран', melee: 'рубка', withdraw: 'отход', reform: 'строятся', rout: 'бегут',
+      stand: 'отбиваются',
     },
   };
 

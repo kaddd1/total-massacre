@@ -220,6 +220,93 @@ const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
   check(`~2000 soldiers simulate in < 10 ms per step (${ms.toFixed(2)} ms)`, ms < 10 && B.units.length > 1900);
 }
 
+// ---------------------------------------------------------------- stamina, fear, kiting, map edges
+console.log('\n# Stamina, fear, pursuit and map edges');
+const edgeDist = (u) => Math.min(u.x, u.y, TM.CONFIG.WORLD_W - u.x, TM.CONFIG.WORLD_H - u.y);
+{
+  // stamina stays in [0, 1]; a battle line tires in a long fight but is not spent on the march
+  const B = battle([TM.PRESETS[0].red, TM.PRESETS[0].blue], 21);
+  let bad = 0, marchMin = 1;
+  runFor(B, 50, (b) => {
+    for (const u of b.units) if (u.state === 0 && !(u.sta >= 0 && u.sta <= 1)) bad++;
+    if (b.time < 7) for (const u of b.units) if (u.state === 0 && u.type !== 'knight') marchMin = Math.min(marchMin, u.sta);
+  });
+  check('stamina stays within 0..1', bad === 0, `${bad} bad values`);
+  check(`marching to the enemy costs almost no breath (lowest ${marchMin.toFixed(2)})`, marchMin > 0.85);
+}
+{
+  // archers kiting slow giants run themselves out: the chase ends, and not against the map edge
+  const T = [], edge = [];
+  for (const seed of [31, 32, 33, 34]) {
+    const B = battle([auto({ giant: 8 }), auto({ archer: 60 })], seed);
+    let ek = 0;
+    const kill0 = B.kill.bind(B);
+    B.kill = (v, a, nx, ny) => { if (v.type === 'archer' && edgeDist(v) < 30) ek++; return kill0(v, a, nx, ny); };
+    runFor(B, 240);
+    T.push(B.state === 'over' ? B.endTime : 999); edge.push(ek);
+  }
+  check(`8 giants vs 60 archers: the kiting ends within 90 s (${T.map((t) => t.toFixed(0)).join(', ')} s)`, T.every((t) => t < 90));
+  check(`… and the archers are not run into the map edge (deaths at the edge: ${edge.join(', ')})`, mean(edge) < 3);
+}
+{
+  // a big enough archer force still shoots slow monsters down while it falls back
+  let w = 0;
+  for (const seed of [41, 42, 43]) { const B = runFor(battle([auto({ giant: 4 }), auto({ archer: 150 })], seed), 120); if (B.winner === 1) w++; }
+  check(`150 archers kite and kill 4 giants (${w}/3)`, w === 3);
+}
+{
+  // archers caught against the edge fight back instead of being cut down idle
+  const armies = [manual([grp('sword', 80, 1700, 750, 0)]), manual([grp('archer', 80, 2250, 750, Math.PI)])];
+  let helpless = 0, kills = 0, stood = 0;
+  for (const seed of [51, 52, 53]) {
+    const B = battle(armies, seed);
+    const hit0 = B.hit.bind(B);
+    B.hit = (a, v, ...r) => { if (a) a._hitT = B.time; return hit0(a, v, ...r); };
+    const kill0 = B.kill.bind(B);
+    B.kill = (v, a, nx, ny) => { if (v.type === 'archer') { kills++; if (!v.fleeing && edgeDist(v) < 30 && B.time - (v._hitT ?? -99) > 3) helpless++; } return kill0(v, a, nx, ny); };
+    runFor(B, 120, (b) => { if (b.tac.regs.some((r) => r.order === 'stand')) stood++; });
+    if (B.events.some((e) => e.kind === 'stand')) stood += 1000;
+  }
+  check(`cornered archers draw daggers and fight back (idle deaths at the edge: ${helpless} of ${kills})`, helpless <= 2 && stood > 0);
+}
+{
+  // fear of giants: a formed line facing a few giants resists before it breaks
+  const lost = [];
+  for (const seed of [61, 62, 63, 64]) {
+    const B = runFor(battle([auto({ giant: 4 }), auto({ sword: 150 })], seed), 200);
+    lost.push(B.units.filter((u) => u.type === 'giant').reduce((s, u) => s + (u.maxHp - Math.max(0, u.hp)), 0) / (4 * TM.UNIT_TYPES.giant.hp));
+  }
+  check(`150 swordsmen wound 4 giants before the line can break (giants lose ${(mean(lost) * 100).toFixed(0)}% HP on average)`, mean(lost) > 0.25);
+}
+{
+  // the felled giant lifts the hearts of the men around it
+  const B = battle([auto({ giant: 1 }), auto({ sword: 40 })], 71);
+  B.start();
+  runFor(B, 4);
+  const g = B.units.find((u) => u.type === 'giant');
+  const near = B.units.filter((u) => u.team === 1 && u.state === 0);
+  for (const u of near) { u.x = g.x + 60; u.y = g.y; u.morale = 40; }
+  B.rebuild();
+  B.kill(g, near[0], 1, 0);
+  check('a giant falling gives heart to the enemies around it', near.every((u) => u.morale > 60));
+}
+{
+  // giants chasing archers they cannot catch give up and turn on the swordsmen ("Нашествие великанов")
+  let gave = 0;
+  for (const seed of [81, 82, 83]) {
+    const B = runFor(battle([TM.PRESETS[5].red, TM.PRESETS[5].blue], seed), 200);
+    if (B.events.some((e) => e.kind === 'giveup')) gave++;
+  }
+  check(`pursuit that leads nowhere is given up at times (${gave}/3 battles)`, gave >= 1);
+}
+{
+  // a spent regiment moves slower and a tired arm strikes slower
+  const u = TM.Units.create(1, 0, 'sword', 100, 100);
+  u.sta = 1; const fresh = TM.Units.speedK(u);
+  u.sta = 0; const spent = TM.Units.speedK(u);
+  check('exhaustion slows a man down, but never stops him', fresh === 1 && spent >= 0.65 && spent < 0.8);
+}
+
 // ---------------------------------------------------------------- editor geometry
 console.log('\n# Editor groups');
 {

@@ -35,6 +35,7 @@
       crit: 0.10, knock: 45, arrowMul: 1, block: 0.40,
       bonusVs: { spear: 1.15, archer: 1.2 },
       sense: 230, moraleLoss: 3.5, bravery: 1,
+      endurance: 1, recovery: 1,        // stamina: how slowly it is spent / how fast it comes back
     },
     spear: {
       key: 'spear', name: 'Копейщик', max: 500,
@@ -46,6 +47,7 @@
       prefer: { knight: 70, giant: 40 },
       brace: 38,
       sense: 230, moraleLoss: 3.5, bravery: 1.05,
+      endurance: 1, recovery: 1,
     },
     archer: {
       key: 'archer', name: 'Лучник', max: 500,
@@ -55,6 +57,7 @@
       crit: 0.05, knock: 20, arrowMul: 1, block: 0,
       ranged: { range: 390, minRange: 90, dmgMin: 10, dmgMax: 15, cooldown: 1.55, speed: 360, spread: 0.035, crit: 0.12 },
       sense: 400, moraleLoss: 3, bravery: 0.85,
+      endurance: 1, recovery: 1.3,      // light kit: gets its breath back quickly
     },
     knight: {
       key: 'knight', name: 'Рыцарь', max: 250,
@@ -66,6 +69,7 @@
       prefer: { archer: 120 },
       charge: { dmg: 34, minSpeed: 62, knock: 260 },
       sense: 340, moraleLoss: 6, bravery: 1.2,
+      endurance: 2.6, recovery: 1.2,    // the horse gallops long, but not for ever
     },
     giant: {
       key: 'giant', name: 'Великан', max: 40,
@@ -75,6 +79,7 @@
       crit: 0.08, knock: 330, arrowMul: 0.35, block: 0,
       cleave: 1.25, // half-angle in radians
       sense: 260, moraleLoss: 20, fearless: true, terror: 3,
+      endurance: 30, recovery: 0.8,     // never runs, hardly tires: it just keeps coming
     },
   };
 

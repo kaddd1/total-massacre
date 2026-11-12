@@ -2,7 +2,7 @@
 (function (TM) {
   'use strict';
   const U = TM.U;
-  const { ALIVE, DYING, DEAD, ESCAPED } = TM.Units;
+  const { ALIVE, DYING, DEAD, ESCAPED, breathe } = TM.Units;
   const buf = [];
 
   function emptyStats() {
@@ -42,6 +42,7 @@
       this.trampleAcc = 0;
       this.lastCritText = -1;
       this.hitTick = 0;
+      this.tickN = 0;
       // hand-placed armies can stand anywhere (e.g. one above the other): march along the true line to the enemy
       this.freeMarch = setup.armies.some((a) => a.formation === 'manual');
 
@@ -154,6 +155,7 @@
     step(dt) {
       if (this.state === 'deploy') return;
       this.time += dt;
+      this.tickN++;
       this.rebuild();
       TM.Tactics.update(this, dt);
 
@@ -207,8 +209,9 @@
         }
       }
 
-      const sp = Math.hypot(u.vx, u.vy);
+      const sp = Math.sqrt(u.vx * u.vx + u.vy * u.vy);
       u.moveAmt = sp / d.speed;
+      if (((this.tickN + u.id) & 3) === 0) breathe(u, this, sp, dt * 4);   // stamina: every 4th tick, staggered
       const w0 = u.walk;
       u.walk += sp * dt * 0.22;
       if (sp > 12 && (d.charge || u.type === 'giant')) {
@@ -382,6 +385,8 @@
       }
       v.hp -= dmg;
       v.hitFlash = 0.12;
+      // every blow that makes the monster bleed tells the men around it that it can be killed
+      if (a && v.def.terror && a.team !== v.team && kind !== 'fall') a.morale = Math.min(100, a.morale + 1.5);
       if (TM.Audio && TM.Audio.live) this.hitSound(kind, v, dmg, crit);
       // visual-only: pixel flash at the point of impact
       if (kind !== 'fall') {
@@ -444,16 +449,23 @@
           this.fx.text(a.x, a.y - a.r - 4, k + ' убийств!', '#fff', 9);
         }
       }
-      // morale shock around the body
-      const R = 110;
+      // morale shock around the body. It sinks in over the next seconds (units.js) and a man who has
+      // already seen many comrades fall is shaken less by the next one: the fight hardens him.
+      const R = v.def.terror ? 240 : 110;
       const n = this.grid.query(v.x, v.y, R, buf);
       for (let i = 0; i < n; i++) {
         const o = buf[i];
         if (o.state !== ALIVE || o === v) continue;
         const dd = Math.hypot(o.x - v.x, o.y - v.y);
         if (dd > R) continue;
-        if (o.team === v.team) o.morale -= v.def.moraleLoss * (1 - dd / R * 0.7);
-        else o.morale = Math.min(100, o.morale + 1.5);
+        if (o.team === v.team) {
+          if (dd > 110) continue;
+          o.shock += v.def.moraleLoss * (1 - dd / 110 * 0.7) / (1 + o.seen * 0.1);
+          if (this.time - o.contactT < 2) o.seen++;   // hardened only by a fight one takes part in, not by being shot at
+        } else if (v.def.terror) {
+          // the monster is down: a roar goes along the line
+          o.morale = Math.min(100, o.morale + 30 * (1 - dd / R * 0.5)); o.shock *= 0.3;
+        } else o.morale = Math.min(100, o.morale + 1.5);
       }
     }
 

@@ -320,7 +320,7 @@
         const w = Math.round(14 * R.alive / R.n0);
         if (w !== c.w) { c.bar.style.width = w + 'px'; c.w = w; }
         const tip = `${R.name[0].toUpperCase() + R.name.slice(1)}: ${R.alive} из ${R.n0}` +
-          (R.alive === 0 ? ' — уничтожены' : R.routing || R.n === 0 ? ' — бегут' : ` — ${ON[R.order] || R.order}` + (R.def.fearless ? '' : `, мораль ${Math.round(morale)}%`));
+          (R.alive === 0 ? ' — уничтожены' : R.routing || R.n === 0 ? ' — бегут' : ` — ${ON[R.order] || R.order}` + (R.def.fearless ? '' : `, мораль ${Math.round(morale)}%`) + `, силы ${Math.round((R.sta == null ? 1 : R.sta) * 100)}%`);
         if (tip !== c.tip) { c.chip.title = tip; c.tip = tip; }
       }
     },
@@ -386,12 +386,14 @@
       const team = TM.TEAMS[u.team];
       const m = Math.round(u.morale);
       const mc = m > 60 ? '#7bd14b' : m > 30 ? '#e8c23a' : '#e2452f';
+      const sp = Math.round((u.sta == null ? 1 : u.sta) * 100), sc = sp > 50 ? '#8fc7e8' : sp > 25 ? '#e8c23a' : '#e2452f';
       tt.innerHTML =
         `<span class="tt-name t${u.team}">${u.def.name}</span> · ${team.name.toLowerCase()}` +
         (u.fleeing ? ' · <span class="panic">БЕЖИТ</span>' : '') +
         `<br>HP ${Math.ceil(u.hp)}/${u.maxHp} · убийств: ${u.kills}` +
         (u.reg && u.reg.alive ? `<br>Полк: ${u.reg.name} (${u.reg.n}) — ${u.reg.routing ? 'бегут' : TM.Tactics.ORDER_NAME[u.reg.order] || u.reg.order}` : '') +
-        (u.def.fearless ? '<br>Мораль: не знает страха' : `<br>Мораль ${m}%<span class="mbar"><i style="width:${m}%;background:${mc}"></i></span>`);
+        (u.def.fearless ? '<br>Мораль: не знает страха' : `<br>Мораль ${m}%<span class="mbar"><i style="width:${m}%;background:${mc}"></i></span>`) +
+        `<br>Силы ${sp}%<span class="mbar"><i style="width:${sp}%;background:${sc}"></i></span>${sp < 25 ? ' <span class="panic">выдохся</span>' : ''}`;
       tt.style.display = 'block';
       const w = tt.offsetWidth, h = tt.offsetHeight;
       tt.style.left = Math.min(window.innerWidth - w - 8, sx + 16) + 'px';
