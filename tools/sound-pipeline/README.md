@@ -1,34 +1,48 @@
-# Конвейер звуков
+# Sound pipeline
 
-Как из исходных записей (CC0) получаются файлы `assets/sounds/*.mp3`. Игре этот каталог не нужен: она грузит готовый `js/sound-data.js`. Здесь лежит воспроизводимый рецепт: откуда взят каждый звук и как обработан.
+How the CC0 source recordings become `assets/sounds/*.mp3`. The game does not need this folder:
+it loads the prebuilt `js/sound-data.js`. This is the reproducible recipe: where every sound came
+from and how it was processed.
 
-## Что делает
+## Steps
 
-1. **Поиск и скачивание** (`oga_search.py`, `oga_page.py`, `fs_search.py`, `fs_fetch.py`, `dl.py`, `extract.py`). Лицензия каждой страницы проверяется: берутся только CC0. Метаданные (автор, ссылка, лицензия) сохраняются в `oga_meta.json` и `fs_meta.json`. Пакеты Kenney скачиваются со страниц `kenney.nl/assets/impact-sounds` и `kenney.nl/assets/rpg-audio`.
-2. **Декодирование** (`lab.mjs pcm`). Headless Chrome декодирует WAV, OGG, MP3 и FLAC в моно 44.1 кГц. Список источников — `sources.json`.
-3. **Обработка** (`process.mjs`):
-   - нарезка многодублевых записей на отдельные удары или крики по огибающей;
-   - срез низов (high-pass) и плавные фейды, чтобы не было щелчков;
-   - выравнивание громкости по K-взвешенному RMS (максимум окна 100 мс для коротких звуков, среднее для петель) с потолком пика −1 dBFS;
-   - петли (bed) склеиваются кроссфейдом и кодируются «в обёртке»: [хвост | петля | начало], а в бандл пишется точная длина и отпечаток первых 512 отсчётов. Игра вырезает петлю по отпечатку, так что задержка и добивка MP3 не дают паузы или щелчка на стыке в любом браузере;
-   - кодирование в MP3: 80 кбит/с для ударов и петель, 64 для голосов.
+1. **Search and download** (`oga_search.py`, `oga_page.py`, `fs_search.py`, `fs_fetch.py`,
+   `dl.py`, `extract.py`). The license of every page is checked and only CC0 material is kept.
+   Author, link and license are stored in `oga_meta.json` and `fs_meta.json`. The Kenney packs
+   come from `kenney.nl/assets/impact-sounds` and `kenney.nl/assets/rpg-audio`.
+2. **Decoding** (`lab.mjs pcm`): headless Chrome decodes WAV, OGG, MP3 and FLAC to mono 44.1 kHz.
+   The list of sources is `sources.json`.
+3. **Processing** (`process.mjs`):
+   - multi-take recordings are split into single hits or shouts by their envelope;
+   - high-pass filter and short fades so nothing clicks;
+   - loudness normalised by K-weighted RMS (100 ms window maximum for short sounds, average for
+     loops) with a −1 dBFS peak ceiling;
+   - loops are cross-faded and encoded wrapped as [tail | loop | head]; the bundle stores the
+     exact length and a fingerprint of the first 512 samples, and the game cuts the loop by that
+     fingerprint, so MP3 encoder delay and padding never leave a gap or click at the seam;
+   - MP3 encoding: 80 kbit/s for hits and loops, 64 kbit/s for voices.
 
-   Скрипт пишет `assets/sounds/*.mp3`, `manifest.json` и `CREDITS.md`.
-4. **Сборка бандла**: `node tools/build-sound-bundle.mjs` упаковывает MP3 в `js/sound-data.js` (base64). Так игра работает с `file://` и без интернета.
+   The script writes `assets/sounds/*.mp3`, `manifest.json` and `CREDITS.md`.
+4. **Bundle**: `node tools/build-sound-bundle.mjs` packs the MP3 files into `js/sound-data.js`
+   (base64), so the game works from `file://` and offline.
 
-## Запуск
+## Running
 
 ```
 cd tools/sound-pipeline
-npm install --no-save @breezystack/lamejs      # MP3-кодер, нужен только конвейеру
-set TM_SOUND_WORK=<папка с dl/ и pcm/>          # по умолчанию ./work
-node lab.mjs pcm <items.json> <work>/pcm        # декодировать источники
-node process.mjs ../..                          # обработать и записать assets/sounds
-cd ../.. && node tools/build-sound-bundle.mjs   # собрать js/sound-data.js
+npm install --no-save @breezystack/lamejs      # MP3 encoder, needed by the pipeline only
+set TM_SOUND_WORK=<folder with dl/ and pcm/>    # defaults to ./work
+node lab.mjs pcm <items.json> <work>/pcm        # decode the sources
+node process.mjs ../..                          # process and write assets/sounds
+cd ../.. && node tools/build-sound-bundle.mjs   # build js/sound-data.js
 ```
 
-Исходные архивы (~1 ГБ) в проект не входят: их можно заново скачать по ссылкам из `CREDITS.md`.
+The source archives (~1 GB) are not part of the repository; they can be downloaded again from the
+links in `CREDITS.md`.
 
-## Заменить один звук
+## Replacing a single sound
 
-Положите свой MP3 (моно, 44.1 кГц, громкость около −14…−12 dB RMS, с тишиной на краях) поверх файла в `assets/sounds/` с тем же именем и выполните `node tools/build-sound-bundle.mjs`. Категория звука задаётся префиксом имени (`clash_`, `death_` …), список категорий — в `manifest.json`. Если меняете источник, обновите `CREDITS.md`.
+Put your MP3 (mono, 44.1 kHz, about −14…−12 dB RMS, with silence at the edges) over the file in
+`assets/sounds/` with the same name and run `node tools/build-sound-bundle.mjs`. The category of
+a sound is given by its name prefix (`clash_`, `death_` …); the categories are listed in
+`manifest.json`. If you change a source, update `CREDITS.md`.

@@ -91,8 +91,6 @@
     // world position of a soldier's place in the ranks
     slotX(u) { return this.ax + this.cos * u.sdep - this.sin * u.slat; }
     slotY(u) { return this.ay + this.sin * u.sdep + this.cos * u.slat; }
-    get fx() { return this.cos; }
-    get fy() { return this.sin; }
 
     // Fill the places of the fallen from the rear: the first m slots (front ranks, centre first)
     // are given to the m standing soldiers, each slot to the nearest soldier not yet placed.
@@ -798,7 +796,6 @@
       return u.rank === 0 ? 14 : 7;
     },
 
-    NAME,
     // what each order looks like in the tactical overlay / tooltip
     ORDER_NAME: {
       hold: 'держат строй', advance: 'наступают', charge: 'в атаку', engage: 'сеча', brace: 'копья вперёд',

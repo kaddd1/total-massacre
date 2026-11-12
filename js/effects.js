@@ -377,6 +377,5 @@
 
   }
 
-  Effects.P_BLOOD = P_BLOOD; Effects.P_SPARK = P_SPARK; Effects.P_DUST = P_DUST; Effects.P_SPLINTER = P_SPLINTER;
   TM.Effects = Effects;
 })(window.TM = window.TM || {});

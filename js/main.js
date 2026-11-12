@@ -44,7 +44,6 @@
     init() {
       this.setup = loadSetup();
       TM.Sprites.init();
-      console.log(`Sprites generated in ${TM.Sprites.genMs.toFixed(0)} ms`);
       this.fx = new TM.Effects();
       this.renderer = new TM.Render.Renderer(document.getElementById('view'));
       this.cam = new TM.Camera();
@@ -105,7 +104,6 @@
       this.announce();
     },
 
-    // "To battle!" with the size of the armies
     announce() {
       const s = this.battle.stats;
       TM.UI.banner('К БОЮ!', `${s[0].deployed} против ${s[1].deployed}`);
@@ -388,7 +386,8 @@
       window.addEventListener('blur', () => { this.keys = {}; });
     },
 
-    // ?preset=N&start=1&skip=SECONDS&zoom=Z&x=&y=  — handy for testing / screenshots
+    // Developer URL parameters (used by the browser tests):
+    // ?preset=N&start=1&skip=SECONDS&seed=S&mult=K&zoom=Z&x=&y=&follow=type[:team]&tac=1&auto=1&pause=1&bench=1
     debugParams() {
       const q = new URLSearchParams(location.search);
       if (q.has('preset')) this.applyPreset(TM.PRESETS[+q.get('preset')] || TM.PRESETS[0]);

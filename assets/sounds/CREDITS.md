@@ -1,10 +1,10 @@
-# Звуки TOTAL MASSACRE: источники и лицензии
+# TOTAL MASSACRE sounds: sources and licenses
 
-Все звуки взяты из открытых библиотек под лицензией **CC0 1.0 (общественное достояние)**. Атрибуция не требуется, но авторы указаны из уважения к их работе.
+All sounds come from open libraries under **CC0 1.0 (public domain)**. Attribution is not required; the authors are listed out of respect for their work.
 
-Обработка: нарезка дублей из многодублевых записей, фильтрация, фейды, выравнивание громкости, моно 44.1 кГц, MP3. Скрипт конвейера: `tools/sound-pipeline/process.mjs`. В игру файлы попадают через `node tools/build-sound-bundle.mjs` (собирает `js/sound-data.js`).
+Processing: multi-take recordings split into single takes, filtering, fades, loudness normalisation, mono 44.1 kHz, MP3. Pipeline script: `tools/sound-pipeline/process.mjs`. The game loads them through `node tools/build-sound-bundle.mjs` (builds `js/sound-data.js`).
 
-| Источник | Автор | Лицензия | Файлы в игре |
+| Source | Author | License | Files in the game |
 |---|---|---|---|
 | [OpenGameArt "medieval-sound-effects-weapon-impacts"](https://opengameart.org/content/medieval-sound-effects-weapon-impacts) | MedicineStorm | CC0 1.0 | clash_01, clash_02, clash_03, clash_04, clash_05, clash_06, clash_07, clash_08, clash_09, clash_10, clash_11, clash_12, clash_13, clash_14, clash_15, clash_16, clash_17, clash_18, clashHeavy_01, clashHeavy_02, clashHeavy_03, clashHeavy_04, clashHeavy_05, clashHeavy_06, clashHeavy_07, clashHeavy_08, clashHeavy_09, clashHeavy_10, wood_01, wood_02, wood_03, wood_04, wood_05, wood_06, wood_07, wood_08 |
 | [Kenney "Impact Sounds"](https://kenney.nl/assets/impact-sounds) | Kenney (kenney.nl) | CC0 1.0 | wood_09, wood_10, wood_11, wood_12, wood_13, hit_01, hit_02, hit_03, hit_04, hit_05, hit_06, hit_07, hit_08, armor_01, armor_02, armor_03, armor_04, armor_05, arrowHit_03, arrowHit_04, arrowHit_05, arrowGround_01, arrowGround_02, arrowGround_03, arrowGround_04, thud_01, thud_02, thud_03 |
@@ -12,7 +12,7 @@
 | [Kenney "RPG Audio"](https://kenney.nl/assets/rpg-audio) | Kenney (kenney.nl) | CC0 1.0 | slash_01, slash_02, slash_03 |
 | [OpenGameArt "3-melee-sounds"](https://opengameart.org/content/3-melee-sounds) | remaxim | CC0 1.0 | slash_04 |
 | [OpenGameArt "medieval-sound-effects-weapon-textures"](https://opengameart.org/content/medieval-sound-effects-weapon-textures) | MedicineStorm | CC0 1.0 | bow_01, bow_02, bow_03, bow_04, bow_05, bow_06, bow_07, bow_08, arrowFly_01, arrowFly_02, arrowFly_03, arrowFly_04, arrowFly_05, arrowFly_06 |
-| [OpenGameArt "battle-sound-effects"](https://opengameart.org/content/battle-sound-effects) | Ogrebane | CC0 1.0 (на выбор автора: CC-BY 3.0, CC-BY-SA 3.0, GPL 3.0, GPL 2.0, CC0) | bow_09 |
+| [OpenGameArt "battle-sound-effects"](https://opengameart.org/content/battle-sound-effects) | Ogrebane | CC0 1.0 (multi-licensed by the author, used under CC0; options: CC-BY 3.0, CC-BY-SA 3.0, GPL 3.0, GPL 2.0, CC0) | bow_09 |
 | [Freesound #205938 "Arrow Impact"](https://freesound.org/people/Twisted_Euphoria/sounds/205938/) | Twisted_Euphoria | CC0 1.0 | arrowHit_01 |
 | [Freesound #521552 "Arrow Impact"](https://freesound.org/people/omerbhatti34/sounds/521552/) | omerbhatti34 | CC0 1.0 | arrowHit_02 |
 | [Freesound #504626 "BODY FALL - V HVY - DIRT"](https://freesound.org/people/leonelmail/sounds/504626/) | leonelmail | CC0 1.0 | fall_01 |
@@ -20,7 +20,7 @@
 | [Freesound #187136 "BodyFall.wav"](https://freesound.org/people/000600/sounds/187136/) | 000600 | CC0 1.0 | fall_03 |
 | [Freesound #610998 "Medium Male Pain Grunts"](https://freesound.org/people/unfa/sounds/610998/) | unfa | CC0 1.0 | pain_01, pain_02, pain_03, pain_04, pain_05, pain_06 |
 | [Freesound #442288 "male pain sound effects.wav"](https://freesound.org/people/rockittt/sounds/442288/) | rockittt | CC0 1.0 | pain_07, pain_08, pain_09, pain_10, pain_11, pain_12 |
-| [OpenGameArt "male-gruntyelling-sounds"](https://opengameart.org/content/male-gruntyelling-sounds) | HaelDB | CC0 1.0 (на выбор автора: OGA-BY 3.0, CC0) | pain_13, pain_14, pain_15, pain_16, pain_17, pain_18, warcry_01, warcry_02, warcry_03, warcry_04, warcry_05, warcry_06, warcry_07, warcry_08 |
+| [OpenGameArt "male-gruntyelling-sounds"](https://opengameart.org/content/male-gruntyelling-sounds) | HaelDB | CC0 1.0 (multi-licensed by the author, used under CC0; options: OGA-BY 3.0, CC0) | pain_13, pain_14, pain_15, pain_16, pain_17, pain_18, warcry_01, warcry_02, warcry_03, warcry_04, warcry_05, warcry_06, warcry_07, warcry_08 |
 | [OpenGameArt "grunts-male-death-and-pain"](https://opengameart.org/content/grunts-male-death-and-pain) | thebardofblasphemy | CC0 1.0 | death_01, death_02, death_03, death_04, death_05, death_06, death_07, death_08, death_09, death_10, death_11, death_12 |
 | [Freesound #166943 "Moans and screams of agony of military soldiers.flac"](https://freesound.org/people/qubodup/sounds/166943/) | qubodup | CC0 1.0 | death_13, death_14 |
 | [Freesound #131710 "Male Being Impaled/Beaten AC.wav"](https://freesound.org/people/oldedgar/sounds/131710/) | oldedgar | CC0 1.0 | death_15, death_16, death_17, death_18 |

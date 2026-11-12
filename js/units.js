@@ -79,9 +79,9 @@
     u.lastThink = B.time;
 
     // a soldier only looks for fights within reach of his place in the ranks
-    const leash = R ? TM.Tactics.leash(u) : 1e9;
-    const sx = R ? R.slotX(u) : u.x, sy = R ? R.slotY(u) : u.y;
-    const sense = R ? Math.max(MORALE_R, leash + d.reach + 40) : d.sense;
+    const leash = TM.Tactics.leash(u);
+    const sx = R.slotX(u), sy = R.slotY(u);
+    const sense = Math.max(MORALE_R, leash + d.reach + 40);
     const n = B.grid.query(u.x, u.y, sense, buf);
     let best = null, bestScore = 1e9;
     let allies = 0, enemies = 0, fleeingAllies = 0, terror = 0;
@@ -106,18 +106,13 @@
         terror += o.def.terror * (1 - Math.sqrt(d2) / TERROR_R * 0.6) * (0.35 + 0.65 * o.hp / o.maxHp);
       }
       if (d2 < nearD2) { nearD2 = d2; near = o; }
-      if (u.fleeing) continue;
-      if (R) {
-        if (d.ranged) continue; // archers shoot on the regiment's command; daggers use nearEnemy
-        const lim = leash + d.reach + u.r + o.r + 4;
-        const ox = o.x - sx, oy = o.y - sy;
-        if (ox * ox + oy * oy > lim * lim) continue;
-      }
+      if (u.fleeing || d.ranged) continue; // archers shoot on the regiment's command; daggers use nearEnemy
+      const lim = leash + d.reach + u.r + o.r + 4;
+      const ox = o.x - sx, oy = o.y - sy;
+      if (ox * ox + oy * oy > lim * lim) continue;
 
-      let s = Math.sqrt(d2);
+      let s = Math.sqrt(d2) + o.attackers * 9;
       if (d.prefer && d.prefer[o.type]) s -= d.prefer[o.type];
-      if (!R && d.ranged) s += o.attackers * 25 + U.rand() * 50;
-      else s += o.attackers * 9;
       if (o.fleeing) s += 30;
       if (o === u.target) s -= 25;
       if (s < bestScore) { bestScore = s; best = o; }
@@ -147,18 +142,16 @@
         // shoulder to shoulder in a formed regiment the monster is faced, not fled; and after a
         // while face to face with it, one learns that it bleeds too
         u.facedT += el;
-        const ranks = R && R.discipline && !R.routing && allies >= 8 ? 0.6 : 1;
+        const ranks = R.discipline && !R.routing && allies >= 8 ? 0.6 : 1;
         dm -= terror * ranks / (1 + u.facedT / 15);
       }
       if (lossR > 0.55) dm -= (lossR - 0.55) * 22;
-      if (R) {
-        if (R.routing) dm -= 7;                                   // the regiment is running
-        else if (!u.fleeing) {
-          const ox = u.x - sx, oy = u.y - sy;
-          if (R.discipline && ox * ox + oy * oy < 576) dm += 1.5; // shoulder to shoulder in the ranks
-          dm -= R.flankHits * 0.9;                                // blows from the flank and the rear
-          if (R.strength < 0.5) dm -= (0.5 - R.strength) * 8;     // the regiment is melting away
-        }
+      if (R.routing) dm -= 7;
+      else if (!u.fleeing) {
+        const ox = u.x - sx, oy = u.y - sy;
+        if (R.discipline && ox * ox + oy * oy < 576) dm += 1.5; // shoulder to shoulder in the ranks
+        dm -= R.flankHits * 0.9;                                // blows from the flank and the rear
+        if (R.strength < 0.5) dm -= (0.5 - R.strength) * 8;     // the regiment is melting away
       }
       // a man out of breath takes heart more slowly
       dm *= dm < 0 ? 1 / u.bravery : u.bravery * (0.6 + 0.4 * tiredness(u));
@@ -192,7 +185,7 @@
     }
 
     // ----- targeting -----
-    if (R && d.ranged) {
+    if (d.ranged) {
       // a cornered archer draws his dagger; otherwise he aims where his regiment shoots
       const nd = near ? Math.sqrt(nearD2) - u.r - near.r : 1e9;
       u.target = near && (nd < d.reach + 3 || (R.order === 'stand' && nd < 22)) ? near : (R.aim && R.aim.state === ALIVE ? R.aim : null);
@@ -200,30 +193,8 @@
       if (u.target && Math.hypot(u.target.x - u.x, u.target.y - u.y) < d.ranged.range + 30) B.contact[u.team] = true;
       return;
     }
-    if (best) {
-      u.target = best;
-      B.contact[u.team] = true;
-    } else if (!R && (B.contact[u.team] || B.contact[1 - u.team] || B.time > 25)) {
-      u.target = hunt(u, B);
-    } else {
-      u.target = null;
-    }
-  }
-
-  // No regiment and no enemies around: pick the nearest from a random sample of the enemy army.
-  function hunt(u, B) {
-    const list = B.alive[1 - u.team];
-    const len = list.length;
-    if (!len) return null;
-    let best = null, bd = 1e18;
-    const samples = Math.min(len, 12);
-    for (let k = 0; k < samples; k++) {
-      const o = len <= 12 ? list[k] : list[(U.rand() * len) | 0];
-      const dx = o.x - u.x, dy = o.y - u.y;
-      const d2 = dx * dx + dy * dy + (o.fleeing ? 40000 : 0);
-      if (d2 < bd) { bd = d2; best = o; }
-    }
-    return best;
+    u.target = best;
+    if (best) B.contact[u.team] = true;
   }
 
   // ---------------- per-tick behaviour ----------------
@@ -259,8 +230,6 @@
     const R = u.reg;
     let t = u.target;
     if (t && t.state !== ALIVE) { t = u.target = null; u.thinkT = Math.min(u.thinkT, 0.05); }
-
-    if (!R) return loose(u, B, t, speed, dt);
     u.mode = R.order === 'withdraw' ? 1 : 0;
     if (B.winner === u.team) {
       // the field is ours: stand in the ranks and cheer
@@ -376,29 +345,6 @@
     }
     keepRank(u, R, R.slotX(u), R.slotY(u), speed);
     if (R.order === 'shoot' && t && t.state === ALIVE && Math.abs(u.desX) + Math.abs(u.desY) < speed * 0.8) u.faceTo = Math.atan2(t.y - u.y, t.x - u.x);
-  }
-
-  // fallback for a soldier without a regiment: the old free-for-all behaviour
-  function loose(u, B, t, speed, dt) {
-    const d = u.def;
-    if (!t) {
-      const m = B.march[u.team];
-      if (m.x === 0 && m.y === 0) {
-        if (B.winner === u.team && u.z <= 0 && u.type !== 'giant' && U.rand() < dt * 0.8) u.vz = 70 + U.rand() * 50;
-        return;
-      }
-      u.desX = m.x * speed * 0.8; u.desY = m.y * speed * 0.8;
-      u.faceTo = Math.atan2(m.y, m.x);
-      return;
-    }
-    if (d.ranged) {
-      const dist = Math.hypot(t.x - u.x, t.y - u.y);
-      u.faceTo = Math.atan2(t.y - u.y, t.x - u.x);
-      if (dist > d.ranged.range) { u.desX = (t.x - u.x) / dist * speed; u.desY = (t.y - u.y) / dist * speed; return; }
-      if (u.rangedCd <= 0) { B.fireArrow(u, t, dist); u.rangedCd = d.ranged.cooldown * U.range(0.85, 1.25); u.shotT = 0; }
-      return;
-    }
-    melee(u, B, t, speed, dt);
   }
 
   function startAttack(u, t, gap) {

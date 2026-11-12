@@ -28,7 +28,6 @@
       this.arrows = [];
       this.stats = [emptyStats(), emptyStats()];
       this.contact = [false, false];
-      this.march = [{ x: 1, y: 0 }, { x: -1, y: 0 }];
       // where routed units run to: own side of the map (left/right for automatic formations)
       this.home = [{ x: -TM.TEAMS[0].dir, y: 0 }, { x: -TM.TEAMS[1].dir, y: 0 }];
       this.events = [];
@@ -43,7 +42,7 @@
       this.lastCritText = -1;
       this.hitTick = 0;
       this.tickN = 0;
-      // hand-placed armies can stand anywhere (e.g. one above the other): march along the true line to the enemy
+      // hand-placed armies can stand anywhere (e.g. one above the other): see rebuild()
       this.freeMarch = setup.armies.some((a) => a.formation === 'manual');
 
       let id = 0;
@@ -134,20 +133,18 @@
       }
       this.stats[0].alive = a0.length; this.stats[1].alive = a1.length;
       this.stats[0].fleeing = f0; this.stats[1].fleeing = f1;
-      if (!a0.length || !a1.length) {
-        this.march[0].x = this.march[0].y = this.march[1].x = this.march[1].y = 0;
-      } else {
+      if (a0.length && a1.length) {
         cx0 /= a0.length; cy0 /= a0.length; cx1 /= a1.length; cy1 /= a1.length;
         this.center = [{ x: cx0, y: cy0 }, { x: cx1, y: cy1 }];
-        for (let t = 0; t < 2; t++) {
-          const me = this.center[t], en = this.center[1 - t];
-          let mx = Math.sign(en.x - me.x) || TM.TEAMS[t].dir;
-          let my = U.clamp((en.y - me.y) / 500, -0.6, 0.6);
-          if (this.freeMarch) { mx = en.x - me.x; my = en.y - me.y; if (!mx && !my) mx = TM.TEAMS[t].dir; }
-          const l = Math.hypot(mx, my);
-          this.march[t].x = mx / l; this.march[t].y = my / l;
-          // hand-placed armies can stand anywhere: home is straight away from the enemy
-          if (this.freeMarch) { this.home[t].x = -this.march[t].x; this.home[t].y = -this.march[t].y; }
+        // hand-placed armies can stand anywhere: home is straight away from the enemy
+        if (this.freeMarch) {
+          for (let t = 0; t < 2; t++) {
+            const me = this.center[t], en = this.center[1 - t];
+            let mx = en.x - me.x, my = en.y - me.y;
+            if (!mx && !my) mx = TM.TEAMS[t].dir;
+            const l = Math.hypot(mx, my);
+            this.home[t].x = -mx / l; this.home[t].y = -my / l;
+          }
         }
       }
     }

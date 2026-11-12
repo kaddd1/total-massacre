@@ -17,12 +17,8 @@
     seed,
     rand,
     range: (a, b) => a + (b - a) * rand(),
-    int: (a, b) => a + Math.floor(rand() * (b - a + 1)),
-    chance: (p) => rand() < p,
     gauss: () => (rand() + rand() + rand() - 1.5) * 0.8165, // ~N(0,1) cheap
-    pick: (arr) => arr[Math.floor(rand() * arr.length)],
     clamp: (v, a, b) => (v < a ? a : v > b ? b : v),
-    lerp: (a, b, t) => a + (b - a) * t,
     // shortest signed angle from a to b
     angDiff(a, b) {
       let d = b - a;

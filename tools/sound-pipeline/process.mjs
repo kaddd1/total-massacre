@@ -269,7 +269,7 @@ function credit(src) {
   if (src.startsWith('kr_')) return { pack: 'Kenney "RPG Audio"', author: 'Kenney (kenney.nl)', url: 'https://kenney.nl/assets/rpg-audio', license: 'CC0 1.0' };
   const key = Object.keys(OGA_OF).find((k) => src.startsWith(k));
   const slug = OGA_OF[key], m = oga[slug];
-  return { pack: `OpenGameArt "${slug}"`, author: (m.author || ['?'])[0], url: 'https://opengameart.org/content/' + slug, license: 'CC0 1.0' + (m.license.length > 1 ? ' (на выбор автора: ' + m.license.join(', ') + ')' : '') };
+  return { pack: `OpenGameArt "${slug}"`, author: (m.author || ['?'])[0], url: 'https://opengameart.org/content/' + slug, license: 'CC0 1.0' + (m.license.length > 1 ? ' (multi-licensed by the author, used under CC0; options: ' + m.license.join(', ') + ')' : '') };
 }
 const packs = new Map();
 for (const m of manifest) {
@@ -278,11 +278,11 @@ for (const m of manifest) {
   packs.get(c.url).files.push(m.file);
 }
 fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 1));
-let md = '# Звуки TOTAL MASSACRE: источники и лицензии\n\n' +
-  'Все звуки взяты из открытых библиотек под лицензией **CC0 1.0 (общественное достояние)**. Атрибуция не требуется, но авторы указаны из уважения к их работе.\n\n' +
-  'Обработка: нарезка дублей из многодублевых записей, фильтрация, фейды, выравнивание громкости, моно 44.1 кГц, MP3. ' +
-  'Скрипт конвейера: `tools/sound-pipeline/process.mjs`. В игру файлы попадают через `node tools/build-sound-bundle.mjs` (собирает `js/sound-data.js`).\n\n' +
-  '| Источник | Автор | Лицензия | Файлы в игре |\n|---|---|---|---|\n';
+let md = '# TOTAL MASSACRE sounds: sources and licenses\n\n' +
+  'All sounds come from open libraries under **CC0 1.0 (public domain)**. Attribution is not required; the authors are listed out of respect for their work.\n\n' +
+  'Processing: multi-take recordings split into single takes, filtering, fades, loudness normalisation, mono 44.1 kHz, MP3. ' +
+  'Pipeline script: `tools/sound-pipeline/process.mjs`. The game loads them through `node tools/build-sound-bundle.mjs` (builds `js/sound-data.js`).\n\n' +
+  '| Source | Author | License | Files in the game |\n|---|---|---|---|\n';
 for (const p of packs.values()) md += `| [${p.pack}](${p.url}) | ${p.author} | ${p.license} | ${p.files.map((f) => f.replace('.mp3', '')).join(', ')} |\n`;
 fs.writeFileSync(path.join(OUT, 'CREDITS.md'), md);
 console.log('credits:', packs.size, 'sources');

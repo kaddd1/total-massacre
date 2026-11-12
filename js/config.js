@@ -34,7 +34,7 @@
       reach: 8, dmgMin: 14, dmgMax: 21, cooldown: 0.75, windup: 0.17,
       crit: 0.10, knock: 45, arrowMul: 1, block: 0.40,
       bonusVs: { spear: 1.15, archer: 1.2 },
-      sense: 230, moraleLoss: 3.5, bravery: 1,
+      moraleLoss: 3.5, bravery: 1,
       endurance: 1, recovery: 1,        // stamina: how slowly it is spent / how fast it comes back
     },
     spear: {
@@ -46,7 +46,7 @@
       bonusVs: { knight: 3.0, giant: 1.8 },
       prefer: { knight: 70, giant: 40 },
       brace: 38,
-      sense: 230, moraleLoss: 3.5, bravery: 1.05,
+      moraleLoss: 3.5, bravery: 1.05,
       endurance: 1, recovery: 1,
     },
     archer: {
@@ -56,7 +56,7 @@
       reach: 7, dmgMin: 5, dmgMax: 8, cooldown: 0.9, windup: 0.15,
       crit: 0.05, knock: 20, arrowMul: 1, block: 0,
       ranged: { range: 390, minRange: 90, dmgMin: 10, dmgMax: 15, cooldown: 1.55, speed: 360, spread: 0.035, crit: 0.12 },
-      sense: 400, moraleLoss: 3, bravery: 0.85,
+      moraleLoss: 3, bravery: 0.85,
       endurance: 1, recovery: 1.3,      // light kit: gets its breath back quickly
     },
     knight: {
@@ -68,7 +68,7 @@
       bonusVs: { archer: 1.6 },
       prefer: { archer: 120 },
       charge: { dmg: 34, minSpeed: 62, knock: 260 },
-      sense: 340, moraleLoss: 6, bravery: 1.2,
+      moraleLoss: 6, bravery: 1.2,
       endurance: 2.6, recovery: 1.2,    // the horse gallops long, but not for ever
     },
     giant: {
@@ -78,7 +78,7 @@
       reach: 20, dmgMin: 48, dmgMax: 70, cooldown: 1.8, windup: 0.45,
       crit: 0.08, knock: 330, arrowMul: 0.35, block: 0,
       cleave: 1.25, // half-angle in radians
-      sense: 260, moraleLoss: 20, fearless: true, terror: 3,
+      moraleLoss: 20, fearless: true, terror: 3,
       endurance: 30, recovery: 0.8,     // never runs, hardly tires: it just keeps coming
     },
   };

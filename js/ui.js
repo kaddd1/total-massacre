@@ -337,8 +337,6 @@
       return this.icons[key];
     },
 
-    // A feed line; an event with a place on the field shows it when hovered and flies the camera
-    // there on click.
     // a big title over the field for a few seconds
     banner(title, sub, cls) {
       const el = $('banner');
@@ -355,6 +353,8 @@
       else if (ev.kind === 'break' && !B.endTime) this.banner(`${TM.TEAMS[ev.team].name.toUpperCase()} ДРОГНУЛИ!`, 'армия бежит с поля', 'warn');
     },
 
+    // A feed line; an event with a place on the field shows it when hovered and flies the camera
+    // there on click.
     pushFeed(ev) {
       const feed = $('feed'), g = this.game;
       const d = document.createElement('div');
@@ -643,7 +643,6 @@
     },
 
     hideResult() { $('result').classList.add('hidden'); },
-    resultVisible() { return !$('result').classList.contains('hidden'); },
     toggleHelp() { $('help').classList.toggle('hidden'); },
     helpVisible() { return !$('help').classList.contains('hidden'); },
   };

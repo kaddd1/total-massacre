@@ -1,5 +1,24 @@
-# local scratch / test artefacts (never committed)
+# dependencies (the game itself has none; the sound pipeline installs its encoder locally)
+node_modules/
+
+# local scratch work and test artefacts
 .work/
 .cache/
-node_modules/
 tools/sound-pipeline/work/
+*.log
+*.tmp
+*.wav
+
+# environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# editors and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
