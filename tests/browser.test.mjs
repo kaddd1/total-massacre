@@ -214,7 +214,13 @@ async function viewTests(b) {
   check('the "orders" button shows the tactical map', await b.ev(`TM.Game.renderer.showTactics && document.getElementById('btn-tac').classList.contains('on')`));
   await b.key('KeyT', 't');
   check('T hides it and the button follows', await b.ev(`!TM.Game.renderer.showTactics && !document.getElementById('btn-tac').classList.contains('on')`));
-  await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 14; i++) B.step(1 / 60); })()`); await sleep(400);
+  await b.key('KeyV', 'v');
+  check('V turns on the cinema camera', await b.ev(`TM.Game.cam.cine && TM.Game.cam.auto && document.getElementById('btn-cine').classList.contains('on') && !document.getElementById('btn-auto').classList.contains('on')`));
+  await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 12; i++) B.step(1 / 60); TM.Game.cam.cineT = 0; TM.Game.cam.shot = { close: false }; })()`); await sleep(2500);
+  check('it cuts to a crisp close-up of the fighting', await b.ev(`(() => { const c = TM.Game.cam, D = c.view() * c.dpr; return c.shot && c.shot.close && !c.moving && D >= 2 && Math.abs(D - Math.round(D)) < 1e-9; })()`));
+  await b.key('KeyC', 'c');
+  check('C switches back to the ordinary auto camera', await b.ev(`!TM.Game.cam.cine && TM.Game.cam.auto`));
+  await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 2; i++) B.step(1 / 60); })()`); await sleep(400);
   await b.key('Space', ' '); // paused: no new lines push the one under the mouse away
   const fe = await b.ev(`(() => { const el = document.querySelector('.feed-item.go'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   check('feed events know where on the field they happened', !!fe);

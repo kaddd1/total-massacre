@@ -23,6 +23,7 @@
       $('btn-start').addEventListener('click', () => game.start());
       $('btn-pause').addEventListener('click', () => game.togglePause());
       $('btn-auto').addEventListener('click', () => game.toggleAuto());
+      $('btn-cine').addEventListener('click', () => game.toggleCine());
       $('btn-fit').addEventListener('click', () => game.fit());
       $('btn-tac').addEventListener('click', () => game.toggleTactics());
       $('btn-restart').addEventListener('click', () => game.restart());
@@ -212,7 +213,8 @@
       const g = this.game;
       $('btn-pause').textContent = g.paused ? '▶' : '❚❚';
       $('btn-pause').classList.toggle('on', g.paused);
-      $('btn-auto').classList.toggle('on', g.cam.auto);
+      $('btn-auto').classList.toggle('on', g.cam.auto && !g.cam.cine);
+      $('btn-cine').classList.toggle('on', !!g.cam.cine);
       $('btn-tac').classList.toggle('on', !!(g.renderer && g.renderer.showTactics));
       document.querySelectorAll('#speed-group button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === g.speed));
     },

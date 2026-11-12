@@ -244,7 +244,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55); cursor: crosshair; image-rendering: auto;
 }
 .mode-setup #minimap, #minimap.off { display: none; }
-@media (max-width: 1250px) { #minimap { bottom: 78px; width: 200px; height: 125px; } }
+
 #hint { position: absolute; left: 14px; bottom: 16px; font-size: 11px; color: rgba(235, 228, 214, 0.45); z-index: 2; pointer-events: none; }
 .mode-setup #hint { display: none; }
 #perf { position: absolute; right: 14px; bottom: 16px; font-size: 11px; color: rgba(235, 228, 214, 0.4); z-index: 2; pointer-events: none; font-variant-numeric: tabular-nums; }
@@ -351,3 +351,14 @@ kbd { background: #2b251f; border: 1px solid #4a4036; border-bottom-width: 2px; 
 .ed-g button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 3px; }
 .ed-g button:hover { color: #ff8c80; }
 .ed-hint { font-size: 10.5px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+
+/* narrower screens: the battle controls are wide and the regiment chips take the room under the
+   scores — the minimap and the performance line move up, the feed moves down, the hint goes */
+@media (max-width: 1500px) {
+  #hint { display: none; }
+  #perf { bottom: 74px; }
+  #feed { top: 150px; }
+}
+@media (max-width: 1450px) {
+  #minimap { bottom: 78px; width: 200px; height: 125px; }
+}

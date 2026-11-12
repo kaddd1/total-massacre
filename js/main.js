@@ -69,6 +69,7 @@
       this.cam.follow = null;
       this.cam.followReg = null;
       this.cam.aim = null;
+      if (this.cam.cine) this.cam.startCine();
       this.slowT = 0; this.endSeen = false;
       TM.UI.updateHud(this.battle, true);
     },
@@ -95,6 +96,7 @@
       this.paused = false;
       this.cam.auto = true;
       this.cam.follow = null;
+      if (this.cinePref) this.cam.startCine();
       this.battle.start();
       TM.Audio.setPhase('battle');
       TM.Audio.battleStart(this.battle);
@@ -114,6 +116,7 @@
       this.mode = 'battle';
       this.paused = false;
       this.cam.auto = true;
+      if (this.cinePref) this.cam.startCine();
       this.battle.start();
       TM.Audio.setPhase('battle');
       TM.Audio.battleStart(this.battle);
@@ -145,7 +148,8 @@
     },
 
     toggleAuto() {
-      this.cam.auto = !this.cam.auto;
+      this.cam.auto = !this.cam.auto || this.cam.cine;
+      this.cam.cine = false; this.cinePref = false;
       if (this.cam.auto) { this.cam.follow = null; this.cam.followReg = null; this.cam.aim = null; this.cam.stop(); }
       TM.UI.syncControls();
     },
@@ -161,6 +165,15 @@
       } else {
         this.cam.fit(R.vw, R.vh, null, { l: 0, r: 0, t: 80, b: 60 }, true);
       }
+      TM.UI.syncControls();
+    },
+
+    // cinema camera: wide shots and close-ups of the action, cut automatically
+    toggleCine() {
+      const c = this.cam;
+      if (c.cine) c.cine = false;
+      else { c.auto = true; c.follow = null; c.followReg = null; c.stop(); c.startCine(); c.cineT = 0.5; }
+      this.cinePref = c.cine; // remembered for the next battles
       TM.UI.syncControls();
     },
 
@@ -358,6 +371,7 @@
         else if (code === 'KeyR' && this.mode === 'battle') this.restart();
         else if (code === 'KeyF') this.fit();
         else if (code === 'KeyC' && this.mode === 'battle') this.toggleAuto();
+        else if (code === 'KeyV' && this.mode === 'battle') this.toggleCine();
         else if (code === 'KeyH') TM.UI.toggleHelp();
         else if (code === 'KeyM') TM.Audio.toggleMute();
         else if (code === 'KeyT') this.toggleTactics();

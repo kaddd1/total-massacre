@@ -26,6 +26,8 @@
       this.moving = false; // continuous (unsnapped) view this frame
       this.aim = null;     // auto-director target { x, y, z }
       this.aimT = 0; this.closeT = 0;
+      this.cine = false;   // cinema camera (implies auto)
+      this.shot = null; this.cineT = 0; this.shown = new WeakSet();
     }
 
     // Effective zoom actually used for drawing. When a world unit covers >= 1 device
@@ -143,8 +145,103 @@
       return { x0: q(X, 0.03) - pad, y0: q(Y, 0.03) - pad, x1: q(X, 0.97) + pad, y1: q(Y, 0.97) + pad };
     }
 
+    // ------------------------------------------------------------------ cinema camera
+    // "Кино": wide shots of the whole fight (the director above) alternate with close-ups at a crisp
+    // 2x / 3x: a fresh event (a charge into the rear, a regiment breaking, a giant falling…), the
+    // hottest melee, or before the lines meet an advancing regiment. A close-up drifts with the fight
+    // it shows and is cut short when that fight is over. Visual randomness only (Math.random).
+    startCine() { this.cine = true; this.shot = null; this.cineT = 2.5; this.shown = new WeakSet(); this.aim = null; }
+
+    // returns true while a close-up drives the camera
+    cineUpdate(dt, B) {
+      const sh = this.shot;
+      this.cineT -= dt;
+      if (B.endTime && sh && sh.close) this.cineT = Math.min(this.cineT, 0); // the end: back to the whole field
+      if (sh && sh.close) {
+        sh.reT -= dt;
+        if (sh.reT <= 0) {
+          sh.reT = 0.35;
+          const c = this.hotAround(B, sh.tx, sh.ty, 150);
+          if (c) { sh.tx = c.x; sh.ty = c.y; sh.idle = 0; }
+          else if (sh.R && sh.R.alive && (sh.R.n || sh.R.fleeing)) { sh.tx = sh.R.n ? sh.R.cx : sh.R.fcx; sh.ty = sh.R.n ? sh.R.cy : sh.R.fcy; }
+          else if ((sh.idle += 0.35) > 1.4) this.cineT = Math.min(this.cineT, 0.2);
+        }
+        const k = 1 - Math.exp(-1.3 * dt);
+        this.x += (sh.tx - this.x) * k; this.y += (sh.ty - this.y) * k;
+        this.clamp();
+      }
+      if (this.cineT > 0) return !!(sh && sh.close);
+      const spot = !(sh && sh.close) && !B.endTime ? this.hotSpot(B) : null;
+      if (spot) {
+        this.shot = { close: true, tx: spot.x, ty: spot.y, R: spot.R || null, reT: 0.8, idle: 0 };
+        this.cineT = 4.5 + Math.random() * 2.5;
+        this.flyTo(spot.x, spot.y, spot.z / this.dpr, 1.1);
+        return true;
+      }
+      this.shot = { close: false };
+      this.cineT = 3.5 + Math.random() * 2;
+      this.aim = null; this.aimT = 0;
+      return false;
+    }
+
+    // where the fighting is around a point (soldiers who traded blows in the last second)
+    hotAround(B, x, y, r) {
+      const buf = this.qbuf || (this.qbuf = []);
+      const n = B.grid.query(x, y, r, buf);
+      let sx = 0, sy = 0, m = 0;
+      for (let i = 0; i < n; i++) {
+        const u = buf[i];
+        if (u.state !== 0 || B.time - u.contactT > 1) continue;
+        sx += u.x; sy += u.y; m++;
+      }
+      return m >= 3 ? { x: sx / m, y: sy / m } : null;
+    }
+
+    hotSpot(B) {
+      // 1) a fresh event worth a close look
+      const PRIO = { rear: 5, giant: 5, rout: 4, break: 3, brace: 3, blood: 3, hero: 2, flank: 2 };
+      let best = null, bp = 0;
+      for (let i = B.events.length - 1; i >= 0; i--) {
+        const e = B.events[i];
+        if (B.time - e.time > 2.5) break;
+        if (e.x == null || this.shown.has(e)) continue;
+        const p = PRIO[e.kind] || 0;
+        if (p > bp) { bp = p; best = e; }
+      }
+      if (best) {
+        this.shown.add(best);
+        return { x: best.x, y: best.y, z: best.kind === 'giant' || best.kind === 'hero' ? 3 : 2 };
+      }
+      // 2) the hottest melee: soldiers in contact counted on a coarse grid, one of the top three cells
+      const C = 160, cells = new Map();
+      for (let t = 0; t < 2; t++) for (const u of B.alive[t]) {
+        if (B.time - u.contactT > 0.8) continue;
+        const key = ((u.x / C) | 0) * 1000 + ((u.y / C) | 0);
+        let c = cells.get(key);
+        if (!c) { c = { n: 0, x: 0, y: 0 }; cells.set(key, c); }
+        c.n++; c.x += u.x; c.y += u.y;
+      }
+      if (cells.size) {
+        const top = [...cells.values()].sort((a, b) => b.n - a.n).slice(0, 3).filter((c) => c.n >= 4);
+        if (top.length) {
+          const c = top[(Math.random() * top.length) | 0];
+          return { x: c.x / c.n, y: c.y / c.n, z: c.n > 40 ? 2 : 3 };
+        }
+      }
+      // 3) before the lines meet: an advancing regiment (marching in step, standard flying)
+      if (!B.contact[0] && !B.contact[1] && B.tac) {
+        const regs = B.tac.regs.filter((R) => R.active() && R.speed > 0 && R.role !== 'missile');
+        if (regs.length) {
+          const R = regs[(Math.random() * regs.length) | 0];
+          return { x: R.cx, y: R.cy, z: 2, R };
+        }
+      }
+      return null;
+    }
+
     update(dt, B, vw, vh) {
       this.moving = false;
+      if (this.cine && !this.auto) this.cine = false;
       if (this.anim) {
         const a = this.anim;
         a.t += dt;
@@ -181,6 +278,7 @@
         return;
       }
       if (!this.auto || this.glide) return;
+      if (this.cine && this.cineUpdate(dt, B)) return;
       // auto-director: re-aims a few times a second, then eases there; the zoom stays continuous up
       // to 1 device px per world unit, and moves in to the crisp 2x level only when the fight is
       // compact for a while (and back out with some hysteresis), so it never pumps
