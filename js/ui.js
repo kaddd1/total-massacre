@@ -24,6 +24,7 @@
       $('btn-pause').addEventListener('click', () => game.togglePause());
       $('btn-auto').addEventListener('click', () => game.toggleAuto());
       $('btn-fit').addEventListener('click', () => game.fit());
+      $('btn-tac').addEventListener('click', () => game.toggleTactics());
       $('btn-restart').addEventListener('click', () => game.restart());
       $('btn-new').addEventListener('click', () => game.toSetup());
       $('btn-help').addEventListener('click', () => this.toggleHelp());
@@ -212,6 +213,7 @@
       $('btn-pause').textContent = g.paused ? '▶' : '❚❚';
       $('btn-pause').classList.toggle('on', g.paused);
       $('btn-auto').classList.toggle('on', g.cam.auto);
+      $('btn-tac').classList.toggle('on', !!(g.renderer && g.renderer.showTactics));
       document.querySelectorAll('#speed-group button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === g.speed));
     },
 
@@ -276,7 +278,11 @@
           this.chipIcon(cv, R.type, t);
           const bar = document.createElement('b');
           chip.appendChild(cv); chip.appendChild(bar);
-          chip.addEventListener('click', () => { if (R.alive) g.flyTo(R.n ? R.cx : R.fcx, R.n ? R.cy : R.fcy, Math.max(g.cam.goalZoom(), 2 / g.cam.dpr)); });
+          chip.addEventListener('click', () => {
+            if (!R.alive) return;
+            g.flyTo(R.n ? R.cx : R.fcx, R.n ? R.cy : R.fcy, Math.max(g.cam.goalZoom(), 2 / g.cam.dpr));
+            g.cam.followReg = R; // then keep it in view
+          });
           chip.addEventListener('mouseenter', () => { g.renderer.focusReg = R; });
           chip.addEventListener('mouseleave', () => { if (g.renderer.focusReg === R) g.renderer.focusReg = null; });
           el.appendChild(chip);

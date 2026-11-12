@@ -17,6 +17,7 @@
       this.maxZoom = 5;
       this.auto = false;
       this.follow = null;
+      this.followReg = null; // a regiment the camera keeps in view (HUD chip click)
       this.dpr = 1;
       this.ez = this.zoom;
       this.wheelAcc = 0;
@@ -108,6 +109,7 @@
 
     pan(dxScreen, dyScreen) {
       this.anim = null;
+      this.followReg = null;
       const z = this.view();
       this.x -= dxScreen / z;
       this.y -= dyScreen / z;
@@ -160,6 +162,16 @@
         this.moving = true;
         if (Math.abs(Math.log(next / g.z)) < 0.004) { this.zoomAt(g.sx, g.sy, g.z / this.zoom, g.vw, g.vh); this.glide = null; this.moving = false; }
         else this.zoomAt(g.sx, g.sy, next / this.zoom, g.vw, g.vh);
+      }
+      if (this.followReg) {
+        const R = this.followReg;
+        if (!R.alive) this.followReg = null;
+        else {
+          const k = 1 - Math.exp(-2.5 * dt);
+          this.x += ((R.n ? R.cx : R.fcx) - this.x) * k;
+          this.y += ((R.n ? R.cy : R.fcy) - this.y) * k;
+          return;
+        }
       }
       if (this.follow) {
         if (this.follow.state !== TM.Units.ALIVE) { this.follow = null; return; }

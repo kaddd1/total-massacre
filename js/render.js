@@ -25,8 +25,7 @@
       A = 'death'; F = u.vz > 0 ? 0 : 1; return;
     }
     const moving = u.moveAmt > 0.15;
-    const wf = ((Math.floor(u.walk / (Math.PI / 2)) % 4) + 4) % 4;
-    if (u.fleeing && t !== 'knight' && t !== 'giant') { A = 'flee'; F = wf; return; }
+    if (u.fleeing && t !== 'knight' && t !== 'giant') { A = 'flee'; F = ((Math.floor(u.walk / (Math.PI / 2)) % 4) + 4) % 4; return; }
     if (u.atkT >= 0) {
       const w = u.def.windup;
       A = 'attack'; F = u.atkT < w ? 0 : u.atkT < w + 0.09 ? 1 : 2;
@@ -34,6 +33,14 @@
     }
     if (u.hitFlash > 0.03 && HURT[t]) { A = 'hurt'; F = 0; return; } // rocked back by a blow
     const tg = u.target && u.target.state === ALIVE ? u.target : null;
+    // formed infantry in its place in the ranks marches in step with the whole regiment
+    const R = u.reg;
+    let wph = u.walk;
+    if (R && R.discipline && R._wph !== undefined && (R.role === 'front' || R.role === 'support' || R.role === 'missile')) {
+      const dx = u.x - R.slotX(u), dy = u.y - R.slotY(u);
+      if (dx * dx + dy * dy < 100) wph = R._wph;
+    }
+    const wf = ((Math.floor(wph / (Math.PI / 2)) % 4) + 4) % 4;
     if (t === 'archer') {
       if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
       if (tg && !moving && u.rangedCd < 1.1 && Math.hypot(tg.x - u.x, tg.y - u.y) <= u.def.ranged.range + 30) { A = 'aim'; F = 0; return; }
@@ -185,6 +192,10 @@
       const cx0 = vx0 - m, cy0 = vy0 - m, cx1 = vx1 + m, cy1 = vy1 + m * 1.6;
       const order = this.sortUnits(B);
       WIN = B.winner;
+      // marching step of every regiment (visual-only), advanced by the simulated time since last frame
+      const dtB = B === this.stepB ? Math.max(0, B.time - this.stepT) : 0;
+      this.stepB = B; this.stepT = B.time;
+      if (B.tac) for (const Rg of B.tac.regs) Rg._wph = (Rg._wph || 0) + Math.hypot(Rg.vx, Rg.vy) * dtB * 0.22;
       const vis = this.vis, visFr = this.visFr;
       let nv = 0;
       for (let i = 0; i < order.length; i++) {
@@ -212,9 +223,9 @@
       this.drawArrowShadows(ctx, B.arrows, D, ox, oy, n, vx0, vy0, vx1, vy1);
       this.drawWaves(ctx, fx, D, ox, oy, n);
       // the regiment under the mouse (its chip in the HUD, or one of its soldiers) is outlined
-      const fReg = this.focusReg || (hover && hover.reg);
+      const fReg = this.focusReg || (hover && hover.reg) || cam.followReg;
       if (fReg && fReg.alive) {
-        ctx.globalAlpha = this.focusReg ? 0.9 : 0.45;
+        ctx.globalAlpha = this.focusReg ? 0.9 : fReg === cam.followReg && !hover ? 0.35 : 0.45;
         const col = TM.TEAMS[fReg.team].light;
         for (const u of fReg.members) if (u.state === ALIVE && u.x > cx0 && u.x < cx1 && u.y > cy0 && u.y < cy1) this.drawRing(ctx, u, col, D, ox, oy, n);
         ctx.globalAlpha = 1;

@@ -171,8 +171,14 @@
     tick(B, dt) {
       const T = B.tac;
       if (!T) return;
+      if (this.engB !== B) { this.engB = B; this.engSeen = new Map(); }
       for (const Rg of T.regs) {
         if (Rg.alive === 0) continue;
+        // a regiment crashing into the enemy (engaged on at 15 % of its men, off below 5 %)
+        const was = this.engSeen.get(Rg) || false;
+        const eng = !Rg.routing && (was ? Rg.engaged > 0.05 : Rg.engaged > 0.15);
+        if (eng && !was) this.clash(B, Rg);
+        this.engSeen.set(Rg, eng);
         const cav = Rg.role === 'cavalry';
         if (!cav && !(Rg.order === 'charge' && Rg.speed > 0)) continue;
         for (const u of Rg.members) {
@@ -220,6 +226,19 @@
         }
       }
       g.globalAlpha = 1;
+    }
+
+    // the lines meet: a burst of dust and sparks where the men of the regiment came to blows
+    clash(B, Rg) {
+      let k = 0;
+      for (const u of Rg.members) {
+        if (u.state !== 0 || u.fleeing || B.time - u.contactT > 0.4) continue;
+        if (++k > 26) break;
+        const t = u.target && u.target.state === 0 ? u.target : null;
+        const x = t ? (u.x + t.x) / 2 : u.x, y = t ? (u.y + t.y) / 2 : u.y;
+        this.spawn(P_DUST, x + gauss() * 3, y + gauss() * 2 + 1, 1, gauss() * 16, gauss() * 10, 6 + R() * 8, 0.55 + R() * 0.5, 3 + R() * 2.5);
+        if (R() < 0.45) this.sparks(x, y, 2, 2);
+      }
     }
 
     // a giant's footfall

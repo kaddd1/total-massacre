@@ -1,6 +1,6 @@
 // End-to-end tests in real (headless) Chrome via the DevTools protocol: UI, editor, sound.
 //   node tests/browser.test.mjs            (all sections)
-//   node tests/browser.test.mjs ui audio   (selected sections: ui, editor, audio)
+//   node tests/browser.test.mjs ui audio   (selected sections: ui, view, editor, audio)
 // Needs Google Chrome or Edge. Set CHROME_PATH if it is not found automatically.
 // Uses the default autoplay policy on purpose: the sound tests check the "first gesture" flow.
 import { openBrowser, check, results, sleep } from './lib/cdp.mjs';
@@ -178,9 +178,63 @@ async function audioTests(b) {
   check('rapid restarts keep one set of start horns', (await b.ev(`TM.Audio.voices.filter(v => TM.Audio.pools.horn.includes(v.src.buffer)).length`)) <= 2);
 }
 
+// ------------------------------------------------------------------ battle view
+async function viewTests(b) {
+  console.log('\n# Battle view');
+  await b.open('?preset=1&seed=42');
+  const fp = await b.ev(`(() => {
+    const run = (fx, draw) => {
+      const B = new TM.Battle({ armies: JSON.parse(JSON.stringify([TM.PRESETS[1].red, TM.PRESETS[1].blue])), seed: 77 }, fx);
+      B.start();
+      for (let i = 0; i < 60 * 25; i++) { B.step(1 / 60); if (draw && i % 6 === 0) { TM.Game.renderer.render(B, fx, TM.Game.cam, null, null); TM.UI.drawMinimap(B, TM.Game.cam, TM.Game.renderer); } }
+      let h = 0;
+      for (const u of B.units) h = (Math.imul(h, 31) + Math.round(u.x * 100) + Math.round(u.y * 100) + Math.round(u.hp * 10)) | 0;
+      return h + ' ' + B.stats[0].alive + '/' + B.stats[1].alive;
+    };
+    return [run(TM.Game.fx, true), run(new Proxy({}, { get: () => () => {} }), false)];
+  })()`);
+  check('effects and drawing never change the battle (same seed, with and without them)', fp[0] === fp[1], fp);
+
+  await b.open('?preset=0&seed=42');
+  await b.ev('TM.Game.start()'); await sleep(500);
+  check('"to battle" title at the start', await b.ev(`document.getElementById('banner').classList.contains('show') && document.querySelector('#banner .bn-title').textContent.length > 3`));
+  check('every regiment carries its standard', await b.ev(`(() => { const R = TM.Game.renderer, B = TM.Game.battle; return R.bearers.size === B.tac.regs.filter((r) => r.n > 0).length && [...R.bearers.keys()].every((u) => u.state === 0 && !u.fleeing); })()`));
+  check('the HUD has a chip for every regiment', await b.ev(`document.querySelectorAll('.chip').length === TM.Game.battle.tac.regs.length`));
+  check('the minimap is shown in battle', await b.ev(`getComputedStyle(document.getElementById('minimap')).display !== 'none' && document.getElementById('minimap').width > 100`));
+  const mm = await b.ev(`(() => { const r = document.getElementById('minimap').getBoundingClientRect(); return { x: r.x + r.width * 0.2, y: r.y + r.height * 0.8 }; })()`);
+  await b.click(mm.x, mm.y); await sleep(700);
+  check('a click on the minimap brings the camera there', await b.ev(`(() => { const c = TM.Game.cam; return Math.abs(c.x - 0.2 * TM.CONFIG.WORLD_W) < 60 && Math.abs(c.y - 0.8 * TM.CONFIG.WORLD_H) < 60 && !c.auto; })()`));
+  const ch = await b.rect('#hud-regs-1 .chip');
+  await b.click(ch.x, ch.y); await sleep(1200);
+  check('a regiment chip brings the camera to the regiment and keeps it in view', await b.ev(`(() => { const c = TM.Game.cam, R = c.followReg; return !!R && R.team === 1 && Math.hypot(c.x - R.cx, c.y - R.cy) < 80; })()`));
+  await b.key('KeyN', 'n');
+  check('N hides the minimap', await b.ev(`getComputedStyle(document.getElementById('minimap')).display === 'none'`));
+  await b.key('KeyN', 'n');
+  const tb = await b.rect('#btn-tac'); await b.click(tb.x, tb.y);
+  check('the "orders" button shows the tactical map', await b.ev(`TM.Game.renderer.showTactics && document.getElementById('btn-tac').classList.contains('on')`));
+  await b.key('KeyT', 't');
+  check('T hides it and the button follows', await b.ev(`!TM.Game.renderer.showTactics && !document.getElementById('btn-tac').classList.contains('on')`));
+  await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 14; i++) B.step(1 / 60); })()`); await sleep(400);
+  await b.key('Space', ' '); // paused: no new lines push the one under the mouse away
+  const fe = await b.ev(`(() => { const el = document.querySelector('.feed-item.go'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  check('feed events know where on the field they happened', !!fe);
+  if (fe) {
+    await b.mouse('mouseMoved', fe.x, fe.y); await sleep(150);
+    check('hovering a feed event marks its place on the field', await b.ev('!!TM.Game.renderer.focusEvent'));
+    await b.click(fe.x, fe.y); await sleep(900);
+    check('a click on a feed event flies the camera there', await b.ev(`(() => { const e = TM.Game.renderer.focusEvent, c = TM.Game.cam; return !!e && Math.hypot(c.x - e.x, c.y - e.y) < 40; })()`));
+  }
+  await b.key('Space', ' ');
+  await b.ev(`(() => { const B = TM.Game.battle; for (let i = 0; i < 60 * 400 && !B.endTime; i++) B.step(1 / 60); })()`); await sleep(200);
+  check('the decisive moment plays in slow motion', await b.ev('TM.Game.endSeen && TM.Game.slowT > 0'));
+  await sleep(3500);
+  check('the result screen shows the course of the battle', await b.ev(`!document.getElementById('result').classList.contains('hidden') && !!document.getElementById('rchart') && TM.Game.hist.t.length >= 3`));
+  check('the chart ends when the battle was decided', await b.ev(`(() => { const h = TM.Game.hist, B = TM.Game.battle; return Math.abs(h.t[h.t.length - 1] - B.endTime) < 0.6; })()`));
+}
+
 // ------------------------------------------------------------------ run
 const want = process.argv.slice(2);
-const sections = [['ui', uiTests], ['editor', editorTests], ['audio', audioTests]].filter(([n]) => !want.length || want.includes(n));
+const sections = [['ui', uiTests], ['view', viewTests], ['editor', editorTests], ['audio', audioTests]].filter(([n]) => !want.length || want.includes(n));
 const b = await openBrowser();
 try {
   for (const [, fn] of sections) await fn(b);

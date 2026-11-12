@@ -67,6 +67,7 @@
       this.resultShown = false;
       this.hover = null;
       this.cam.follow = null;
+      this.cam.followReg = null;
       this.cam.aim = null;
       this.slowT = 0; this.endSeen = false;
       TM.UI.updateHud(this.battle, true);
@@ -145,13 +146,14 @@
 
     toggleAuto() {
       this.cam.auto = !this.cam.auto;
-      if (this.cam.auto) { this.cam.follow = null; this.cam.aim = null; this.cam.stop(); }
+      if (this.cam.auto) { this.cam.follow = null; this.cam.followReg = null; this.cam.aim = null; this.cam.stop(); }
       TM.UI.syncControls();
     },
 
     fit() {
       this.cam.auto = false;
       this.cam.follow = null;
+      this.cam.followReg = null;
       const R = this.renderer;
       if (this.mode === 'setup') {
         const side = R.vw > 1100 ? 340 : R.vw > 800 ? 300 : 0;
@@ -162,10 +164,16 @@
       TM.UI.syncControls();
     },
 
+    toggleTactics() {
+      this.renderer.showTactics = !this.renderer.showTactics;
+      TM.UI.syncControls();
+    },
+
     // fly the camera to a point of the field (event feed, minimap, regiment chips)
     flyTo(x, y, zoom) {
       this.cam.auto = false;
       this.cam.follow = null;
+      this.cam.followReg = null;
       this.cam.flyTo(x, y, zoom);
       TM.UI.syncControls();
     },
@@ -321,7 +329,7 @@
         else if (down && !dragging && down.button === 0 && this.mode === 'setup') { if (e.target === cv) TM.Editor.click(worldAt(e)); }
         else if (down && !dragging && down.button === 0) {
           this.cam.follow = this.hover || null;
-          if (this.cam.follow) this.cam.auto = false;
+          if (this.cam.follow) { this.cam.auto = false; this.cam.followReg = null; }
           TM.UI.syncControls();
         }
         down = null;
@@ -352,7 +360,7 @@
         else if (code === 'KeyC' && this.mode === 'battle') this.toggleAuto();
         else if (code === 'KeyH') TM.UI.toggleHelp();
         else if (code === 'KeyM') TM.Audio.toggleMute();
-        else if (code === 'KeyT') { R.showTactics = !R.showTactics; }
+        else if (code === 'KeyT') this.toggleTactics();
         else if (code === 'KeyN') TM.UI.toggleMinimap();
         else if (code === 'Equal' || code === 'NumpadAdd') { this.cam.auto = false; this.cam.stepZoom(1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
         else if (code === 'Minus' || code === 'NumpadSubtract') { this.cam.auto = false; this.cam.stepZoom(-1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
