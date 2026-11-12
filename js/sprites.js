@@ -594,16 +594,99 @@
     return P;
   }
 
+  // Recoil from a blow: the fighting pose rocked back on the heels (horsemen and giants just flash).
+  function hurtModel(cls) {
+    const P = cls === 'spear' ? MODELS.spear('ready', 0) : MODELS[cls]('idle', 0);
+    const m = rotY(0.26);
+    for (const p of P) p.xf = { m, p: [0, 0, 0], t: [-0.7, 0, 0] };
+    return P;
+  }
+
   const ANIMS = {
-    sword: [['idle', 1], ['walk', 4], ['attack', 3], ['flee', 4], ['death', 3]],
-    spear: [['idle', 1], ['walk', 4], ['ready', 1], ['walkReady', 4], ['attack', 3], ['flee', 4], ['death', 3]],
-    archer: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['attack', 3], ['flee', 4], ['death', 3]],
+    sword: [['idle', 1], ['walk', 4], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
+    spear: [['idle', 1], ['walk', 4], ['ready', 1], ['walkReady', 4], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
+    archer: [['idle', 1], ['walk', 4], ['aim', 1], ['release', 1], ['attack', 3], ['hurt', 1], ['flee', 4], ['death', 3]],
     knight: [['idle', 1], ['walk', 4], ['ready', 1], ['charge', 4], ['attack', 3], ['death', 3]],
     giant: [['idle', 1], ['walk', 4], ['attack', 3], ['death', 3]],
   };
 
   // ------------------------------------------------------------------ atlas building
   function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+  // A small pixel sprite from a grid of [r,g,b] (or null), with the same 1px dark outline as the units.
+  // halo: one more, half-transparent dark ring (and 1px of padding) so a marker stands out from a crowd.
+  function gridSprite(w, h, pix, outline, halo) {
+    const p = halo ? 1 : 0, W = w + 2 * p, H = h + 2 * p;
+    const cv = makeCanvas(W, H), c = cv.getContext('2d');
+    const img = c.createImageData(W, H), d = img.data;
+    const at = (x, y) => (x >= 0 && y >= 0 && x < w && y < h ? pix[y * w + x] : null);
+    const near = (x, y) => at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1);
+    for (let y = -p; y < h + p; y++) for (let x = -p; x < w + p; x++) {
+      let col = at(x, y), a = 255;
+      if (!col && outline && near(x, y)) col = OUTLINE_RGB;
+      else if (!col && halo && (near(x - 1, y) || near(x + 1, y) || near(x, y - 1) || near(x, y + 1) || at(x - 1, y - 1) || at(x + 1, y - 1) || at(x - 1, y + 1) || at(x + 1, y + 1))) { col = OUTLINE_RGB; a = 120; }
+      if (!col) continue;
+      const o = ((y + p) * W + x + p) * 4;
+      d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = a;
+    }
+    c.putImageData(img, 0, 0);
+    return cv;
+  }
+
+  // ------------------------------------------------------------------ regiment standards
+  // A swallow-tailed flag in the team colours with the emblem of the arm, flying in the wind
+  // (to the east) in 4 frames; and the same standard fallen on the ground (baked into the field
+  // where a regiment broke or died).
+  const EMBLEM = {
+    sword: ['..#..', '..#..', '..#..', '.###.', '..#..'],
+    spear: ['..#..', '.###.', '#.#.#', '..#..', '..#..'],
+    archer: ['.##.#', '#..##', '#..#.', '#..##', '.##.#'],
+    knight: ['.###.', '#...#', '#...#', '#...#', '##.##'],
+    giant: ['.###.', '#####', '#.#.#', '#####', '.#.#.'],
+  };
+  const BANNER = { W: 16, H: 28, CW: 12, CH: 8, TOP: 2, AX: 1 }; // AX: pole column; anchor = pole foot
+  function makeBanner(team, type, f) {
+    const { W, H, CW, CH, TOP } = BANNER;
+    const pix = new Array(W * H).fill(null);
+    const P = TEAM_PAL[team];
+    const cloth = [hexRgb(P.team[1]), hexRgb(P.team[2]), hexRgb(P.team[3])];
+    const trim = [hexRgb(P.trim[1]), hexRgb(P.trim[2]), hexRgb(P.trim[3])];
+    const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < W && y < H) pix[y * W + x] = c; };
+    for (let y = TOP; y < H - 1; y++) set(1, y, hexRgb(y < TOP + CH ? '#8b5e31' : '#6e4a26'));
+    set(1, TOP - 1, trim[2]);
+    const em = EMBLEM[type];
+    const ph = f * Math.PI / 2;
+    for (let i = 0; i < CW; i++) {
+      const amp = Math.min(1, i / 4) * 1.3;
+      const off = Math.round(Math.sin(i * 0.78 - ph) * amp);
+      const sl = Math.cos(i * 0.78 - ph) * Math.min(1, i / 3);
+      const shade = sl > 0.45 ? 2 : sl < -0.45 ? 0 : 1;
+      for (let j = 0; j < CH; j++) {
+        if ((i === CW - 2 && j >= 3 && j <= 4) || (i === CW - 1 && j >= 2 && j <= 5)) continue; // swallowtail
+        let col = cloth[shade];
+        if (j === CH - 1) col = trim[shade === 0 ? 0 : 1];                     // fringe
+        const ex = i - 2, ey = j - 1;
+        if (ex >= 0 && ex < 5 && ey >= 0 && ey < 5 && em[ey][ex] === '#') col = trim[shade === 0 ? 1 : 2];
+        set(2 + i, TOP + j + off, col);
+      }
+    }
+    return [gridSprite(W, H, pix, true), gridSprite(W, H, pix, true, true)];
+  }
+  function makeFallen(team) {
+    const W = 19, H = 10;
+    const pix = new Array(W * H).fill(null);
+    const P = TEAM_PAL[team];
+    const dim = (h, k) => hexRgb(h).map((v) => (v * k) | 0);
+    const cloth = [dim(P.team[0], 1), dim(P.team[1], 0.9), dim(P.team[2], 0.8)];
+    const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < W && y < H) pix[y * W + x] = c; };
+    for (let i = 0; i <= 15; i++) set(1 + i, Math.round(8 - i * 0.36), dim('#6e4a26', 0.85));
+    const shape = ['.####..', '######.', '#######', '.#####.', '..##...'];
+    shape.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch === '#') set(10 + x, 2 + y, cloth[(x * 3 + y * 5) % 7 < 2 ? 0 : (x + y) % 3 === 0 ? 2 : 1]);
+    }));
+    set(12, 3, dim(P.trim[2], 0.8)); set(13, 4, dim(P.trim[2], 0.8));
+    return gridSprite(W, H, pix, true);
+  }
 
   function pack(frames, key, width) {
     const order = frames.map((f, i) => i).filter((i) => frames[i][key]).sort((a, b) => frames[b][key].h - frames[a][key].h);
@@ -663,7 +746,7 @@
         poses[cls] = {};
         for (const [anim, n] of ANIMS[cls]) {
           poses[cls][anim] = [];
-          for (let f = 0; f < n; f++) poses[cls][anim].push(anim === 'death' ? deathModel(cls, f) : MODELS[cls](anim, f));
+          for (let f = 0; f < n; f++) poses[cls][anim].push(anim === 'death' ? deathModel(cls, f) : anim === 'hurt' ? hurtModel(cls) : MODELS[cls](anim, f));
         }
       }
 
@@ -859,6 +942,18 @@
         rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch !== '0') { c.fillStyle = ch === '1' ? '#120c0b' : '#ffd34d'; c.fillRect(x, y, 1, 1); } }));
         this.marker = cv;
       }
+      // regiment standards: [team][type][wave frame], and fallen ones for the ground layer
+      this.BANNER = BANNER;
+      // (banners: in the scene; bannerMarks: with a dark halo, for medium and far zoom)
+      this.banners = [{}, {}]; this.bannerMarks = [{}, {}];
+      for (let team = 0; team < 2; team++) {
+        for (const type of TM.UNIT_ORDER) {
+          const fr = [0, 1, 2, 3].map((f) => makeBanner(team, type, f));
+          this.banners[team][type] = fr.map((v) => v[0]);
+          this.bannerMarks[team][type] = fr.map((v) => v[1]);
+        }
+      }
+      this.fallen = [makeFallen(0), makeFallen(1)];
       this.rings = {};
       this.texts = new Map();
     },

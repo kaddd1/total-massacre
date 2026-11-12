@@ -14,11 +14,16 @@
 
   // ---------------------------------------------------------------- animation choice
   // Visual-only state machine: reads simulation state, never writes it.
-  let A = 'idle', F = 0;
+  let A = 'idle', F = 0, WIN = -1;
+  const HURT = { sword: 1, spear: 1, archer: 1 };
   function choose(u) {
     if (u.state === DYING) { A = 'death'; F = u.deathT < 0.12 ? 0 : u.deathT < 0.26 ? 1 : 2; return; }
-    if (u.z > 2) { A = 'death'; F = u.vz > 0 ? 0 : 1; return; } // knocked into the air: tumbling
     const t = u.type;
+    if (u.z > 2) {
+      // the winners jump for joy, swords and clubs in the air; anyone else up there was knocked flying
+      if (u.team === WIN) { if (t === 'sword' || t === 'giant') { A = 'attack'; F = 0; } else { A = 'idle'; F = 0; } return; }
+      A = 'death'; F = u.vz > 0 ? 0 : 1; return;
+    }
     const moving = u.moveAmt > 0.15;
     const wf = ((Math.floor(u.walk / (Math.PI / 2)) % 4) + 4) % 4;
     if (u.fleeing && t !== 'knight' && t !== 'giant') { A = 'flee'; F = wf; return; }
@@ -27,6 +32,7 @@
       A = 'attack'; F = u.atkT < w ? 0 : u.atkT < w + 0.09 ? 1 : 2;
       return;
     }
+    if (u.hitFlash > 0.03 && HURT[t]) { A = 'hurt'; F = 0; return; } // rocked back by a blow
     const tg = u.target && u.target.state === ALIVE ? u.target : null;
     if (t === 'archer') {
       if (u.shotT < 0.2) { A = 'release'; F = 0; return; }
@@ -45,6 +51,29 @@
 
   const BLOOD = ['#7a0f0c', '#a3170f', '#5c0a08'];
 
+  // ---------------------------------------------------------------- regiment standards
+  // Every formed regiment carries its standard: a soldier of the second rank, centre. If he falls,
+  // the nearest man picks it up; when the regiment breaks (or dies) the standard drops to the ground.
+  const STD_BASE = { sword: 4, spear: 4, archer: 4, knight: 9, giant: 19 }; // hand height, art px
+  function pickBearer(R, s) {
+    let best = null, bd = Infinity;
+    const fresh = !s.bearer, td = R.front - R.spacing * 1.5;
+    for (const u of R.members) {
+      if (u.state !== ALIVE || u.fleeing) continue;
+      const d = fresh ? (u.sdep - td) * (u.sdep - td) + u.slat * u.slat : (u.x - s.x) * (u.x - s.x) + (u.y - s.y) * (u.y - s.y);
+      if (d < bd) { bd = d; best = u; }
+    }
+    return best;
+  }
+
+  // Map pings of the tactical events (the same ones as in the feed): rings spreading from where a
+  // regiment broke, charged a flank, planted its pikes… [colour, radius (world units), seconds]
+  const PING = {
+    rout: ['#ffb347', 70, 2.6], break: ['#ffb347', 130, 3], rear: ['#ff6a4a', 55, 2.2], flank: [null, 45, 1.8],
+    brace: ['#efe9d8', 45, 1.8], reserve: [null, 55, 2], volley: ['#ffd34d', 35, 1.3], rally: ['#8fe060', 50, 2.2],
+    giant: ['#ffd34d', 80, 2.6], blood: ['#ff6a4a', 35, 1.6], hero: ['#ffffff', 30, 1.6], win: [null, 150, 3.2],
+  };
+
   class Renderer {
     constructor(canvas) {
       this.canvas = canvas;
@@ -52,7 +81,46 @@
       this.dpr = 1; this.vw = 1; this.vh = 1;
       this.order = []; this.lastB = null;
       this.vis = []; this.visFr = [];
+      this.std = new Map(); this.stdB = null; this.bearers = new Map();
       this.resize();
+    }
+
+    // visual-only bookkeeping of the standards; returns bearer -> standard
+    updateStandards(B, fx) {
+      const map = this.bearers;
+      map.clear();
+      if (B !== this.stdB) { this.stdB = B; this.std = new Map(); }
+      if (!B.tac) return map;
+      for (const R of B.tac.regs) {
+        let s = this.std.get(R);
+        if (!s) { s = { R, bearer: null, phase: Math.random() * 4, x: R.cx, y: R.cy, up: true, falls: 0 }; this.std.set(R, s); }
+        if (R.routing || R.n === 0) {
+          if (s.up && s.bearer && (R.routing || R.alive === 0) && s.falls < 2 && B.state !== 'deploy') { fx.stampStandard(s.x, s.y, R.team); s.falls++; }
+          s.up = false; s.bearer = null;
+          continue;
+        }
+        s.up = true;
+        let b = s.bearer;
+        if (!b || b.state !== ALIVE || b.fleeing || b.reg !== R) b = s.bearer = pickBearer(R, s);
+        if (!b) continue;
+        s.x = b.x; s.y = b.y;
+        map.set(b, s);
+      }
+      return map;
+    }
+
+    // the standard above its bearer: close up it is part of the scene (art scale, depth-sorted);
+    // from medium zoom out it is a marker on top of the crowd (1 device px per art px, dark halo,
+    // shorter pole)
+    drawStandard(ctx, s, u, px, py, n, si, t) {
+      const S = TM.Sprites, BN = S.BANNER, R = s.R;
+      const mark = !(si === 0 && n >= 2), pad = mark ? 1 : 0, k = mark ? 1 : n;
+      const cv = (mark ? S.bannerMarks : S.banners)[R.team][R.type][((t * 7 + s.phase) | 0) & 3];
+      const scale = si === 0 ? n : S.SCALES[si];
+      const base = Math.round(STD_BASE[u.type] * scale) + (mark ? 1 : 0);
+      const h = BN.H + 2 * pad - (mark ? (si === 0 ? 6 : si === 1 ? 9 : 12) : 0), w = BN.W + 2 * pad;
+      const off = mark ? 1 : (u.type === 'knight' ? 4 : u.type === 'giant' ? 9 : 3) * n;
+      ctx.drawImage(cv, 0, 0, w, h, px + off - (BN.AX + pad) * k, py - base - h * k, w * k, h * k);
     }
 
     resize() {
@@ -116,6 +184,7 @@
       const m = 60;
       const cx0 = vx0 - m, cy0 = vy0 - m, cx1 = vx1 + m, cy1 = vy1 + m * 1.6;
       const order = this.sortUnits(B);
+      WIN = B.winner;
       const vis = this.vis, visFr = this.visFr;
       let nv = 0;
       for (let i = 0; i < order.length; i++) {
@@ -141,10 +210,22 @@
         ctx.globalAlpha = 1;
       }
       this.drawArrowShadows(ctx, B.arrows, D, ox, oy, n, vx0, vy0, vx1, vy1);
+      this.drawWaves(ctx, fx, D, ox, oy, n);
+      // the regiment under the mouse (its chip in the HUD, or one of its soldiers) is outlined
+      const fReg = this.focusReg || (hover && hover.reg);
+      if (fReg && fReg.alive) {
+        ctx.globalAlpha = this.focusReg ? 0.9 : 0.45;
+        const col = TM.TEAMS[fReg.team].light;
+        for (const u of fReg.members) if (u.state === ALIVE && u.x > cx0 && u.x < cx1 && u.y > cy0 && u.y < cy1) this.drawRing(ctx, u, col, D, ox, oy, n);
+        ctx.globalAlpha = 1;
+      }
       this.drawRing(ctx, hover, '#f4efe2', D, ox, oy, n);
       this.drawRing(ctx, follow, '#ffd34d', D, ox, oy, n);
 
-      // units
+      // units (close up a standard is drawn right after its bearer, in depth order)
+      const bearers = this.updateStandards(B, fx);
+      const animT = B.state === 'deploy' ? performance.now() / 1000 : B.time;
+      const stdInline = si === 0 && n >= 2 && bearers.size > 0;
       for (let i = 0; i < nv; i++) {
         const u = vis[i], fr = visFr[i].body;
         const px = Math.round(u.x * D + ox), py = Math.round((u.y - u.z * K) * D + oy);
@@ -152,15 +233,23 @@
         ctx.drawImage(set.color[u.team], fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
         if (u.hitFlash > 0 && u.state === ALIVE && si <= 1) {
           // hit flash: white silhouette fading out over the normal sprite
-          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * 0.75;
+          ctx.globalAlpha = Math.min(1, u.hitFlash / 0.12) * (u.type === 'giant' ? 0.35 : 0.75); // a giant takes blows all the time
           ctx.drawImage(set.flash, fr.x, fr.y, fr.w, fr.h, dx, dy, dw, dh);
           ctx.globalAlpha = 1;
+        }
+        if (stdInline) { const s = bearers.get(u); if (s) this.drawStandard(ctx, s, u, px, py, n, si, animT); }
+      }
+      if (!stdInline && bearers.size) {
+        for (const [u, s] of bearers) {
+          if (u.x < cx0 || u.x > cx1 || u.y < cy0 || u.y > cy1) continue;
+          this.drawStandard(ctx, s, u, Math.round(u.x * D + ox), Math.round((u.y - u.z * K) * D + oy), n, si, animT);
         }
       }
 
       this.drawArrows(ctx, B.arrows, D, ox, oy, n, si, K, vx0, vy0, vx1, vy1);
       this.drawParticles(ctx, fx, D, ox, oy, n, K, vx0, vy0, vx1, vy1);
       this.drawImpacts(ctx, fx, D, ox, oy, n, K);
+      this.drawPings(ctx, B, D, ox, oy, n);
       this.drawOverlays(ctx, nv, D, ox, oy, n, K, follow);
       this.drawTexts(ctx, fx, D, ox, oy, n, K);
 
@@ -173,46 +262,117 @@
       ctx.strokeRect(ox, oy, Wd * D, Hd * D);
     }
 
-    // Tactical overlay (key T): every regiment's facing, where it is heading and its current order.
+    // Tactical overlay (key T), drawn like a staff map: every regiment's footprint (its front edge
+    // bold), a dashed arrow where it is marching, an arrow to the enemy it charges or shoots at, and a
+    // label with its order under it. Routing regiments get an orange marker where the runners are.
     drawTactics(ctx, B, D, ox, oy, n) {
-      const k = D >= 0.999 ? Math.max(1, Math.round(n / 2)) : 1, lw = Math.max(1, k);
-      const ON = TM.Tactics.ORDER_NAME;
+      const k = D >= 0.999 ? Math.max(1, Math.round(n / 2)) : 1;
+      const ON = TM.Tactics.ORDER_NAME, S = TM.Sprites;
+      const sx = (x) => x * D + ox, sy = (y) => y * D + oy;
+      const arrow = (x0, y0, x1, y1, col, w, dash, head) => {
+        const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy);
+        if (l < 4) return;
+        const ux = dx / l, uy = dy / l, hs = head * k;
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = w;
+        ctx.setLineDash(dash ? [5 * k, 4 * k] : []);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * hs * 0.8, y1 - uy * hs * 0.8); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 - ux * hs - uy * hs * 0.55, y1 - uy * hs + ux * hs * 0.55);
+        ctx.lineTo(x1 - ux * hs + uy * hs * 0.55, y1 - uy * hs - ux * hs * 0.55);
+        ctx.closePath(); ctx.fill();
+      };
+      const labels = [];
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       for (const R of B.tac.regs) {
         if (R.alive === 0 || (R.n === 0 && !R.routing)) continue;
         const T = TM.TEAMS[R.team];
-        const rx = R.routing ? R.fcx : R.cx, ry = R.routing ? R.fcy : R.cy;
-        const cx = Math.round(rx * D + ox), cy = Math.round(ry * D + oy);
-        ctx.lineWidth = lw;
-        ctx.strokeStyle = T.light; ctx.globalAlpha = 0.75;
-        if (!R.routing && R.speed > 0) {
-          ctx.setLineDash([4 * lw, 3 * lw]);
-          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(Math.round(R.goalX * D + ox), Math.round(R.goalY * D + oy)); ctx.stroke();
-          ctx.setLineDash([]);
+        if (R.routing || R.n === 0) {
+          const x = sx(R.fcx), y = sy(R.fcy), r = 7 * k;
+          ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 2 * k;
+          ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke();
+          labels.push({ x, y: y + r + 3 * k, text: `${R.name} ${R.fleeing}: бегут`, col: '#ffb347' });
+          continue;
         }
-        if (R.target && R.target.alive > 0 && !R.routing) {
-          ctx.strokeStyle = R.order === 'shoot' ? '#ffd34d' : R.role === 'cavalry' ? '#ff9a3c' : T.color;
-          ctx.globalAlpha = 0.45;
-          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(Math.round(R.target.cx * D + ox), Math.round(R.target.cy * D + oy)); ctx.stroke();
+        // footprint: where the regiment's ranks stand
+        const c = R.cos, s = R.sin;
+        const P = (dep, lat) => [sx(R.ax + c * dep - s * lat), sy(R.ay + s * dep + c * lat)];
+        const f0 = P(R.front, -R.halfW), f1 = P(R.front, R.halfW), b1 = P(R.back, R.halfW), b0 = P(R.back, -R.halfW);
+        ctx.globalAlpha = 0.07; ctx.fillStyle = T.light;
+        ctx.beginPath(); ctx.moveTo(f0[0], f0[1]); ctx.lineTo(f1[0], f1[1]); ctx.lineTo(b1[0], b1[1]); ctx.lineTo(b0[0], b0[1]); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 0.45; ctx.strokeStyle = T.light; ctx.lineWidth = Math.max(1, k);
+        ctx.stroke();
+        ctx.globalAlpha = 0.95; ctx.lineWidth = 2.5 * k;
+        ctx.strokeStyle = R.engaged > 0.15 ? '#ff8c80' : T.light;
+        ctx.beginPath(); ctx.moveTo(f0[0], f0[1]); ctx.lineTo(f1[0], f1[1]); ctx.stroke();
+        const fx = (f0[0] + f1[0]) / 2, fy = (f0[1] + f1[1]) / 2;
+        // where it is going
+        if (R.speed > 0 && Math.hypot(R.goalX - R.ax, R.goalY - R.ay) > 24) {
+          ctx.globalAlpha = 0.7;
+          arrow(fx, fy, sx(R.goalX + c * R.front), sy(R.goalY + s * R.front), T.light, Math.max(1, 1.5 * k), true, 7);
         }
-        // facing arrow
-        if (!R.routing) {
-          ctx.globalAlpha = 0.9; ctx.strokeStyle = '#fff';
-          const len = Math.max(14, (R.front + 12) * D), ex = cx + R.cos * len, ey = cy + R.sin * len;
-          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
-          ctx.lineTo(ex - R.cos * 6 * lw - R.sin * 4 * lw, ey - R.sin * 6 * lw + R.cos * 4 * lw);
-          ctx.moveTo(ex, ey); ctx.lineTo(ex - R.cos * 6 * lw + R.sin * 4 * lw, ey - R.sin * 6 * lw - R.cos * 4 * lw);
-          ctx.stroke();
+        // whom it attacks
+        const E = R.target;
+        if (E && E.alive > 0 && E.n > 0) {
+          const ex = sx(E.cx), ey = sy(E.cy), dx = ex - fx, dy = ey - fy, l = Math.hypot(dx, dy) || 1;
+          const stop = Math.min(l * 0.8, Math.max(8, E.radius * D * 0.6));
+          const tx = ex - dx / l * stop, ty = ey - dy / l * stop;
+          if (R.order === 'shoot') { ctx.globalAlpha = 0.75; arrow(fx, fy, tx, ty, '#ffd34d', Math.max(1, k), true, 6); }
+          else if (R.role === 'cavalry' && (R.order === 'approach' || R.order === 'lance' || R.order === 'flank' || R.order === 'melee')) { ctx.globalAlpha = 0.9; arrow(fx, fy, tx, ty, '#ff9a3c', 2 * k, false, 9); }
+          else if ((R.order === 'charge' || R.order === 'engage') && l > 40 * k) { ctx.globalAlpha = 0.85; arrow(fx, fy, tx, ty, '#ff6a58', 2 * k, false, 9); }
         }
-        ctx.globalAlpha = 1;
-        const label = R.routing ? `${R.name} ${R.fleeing}: бегут` : `${R.name} ${R.n}: ${ON[R.order] || R.order}`;
-        const cv = TM.Sprites.text(label, R.routing ? '#ffb347' : R.engaged > 0.15 ? '#ff8c80' : '#ffffff');
-        // above the regiment's on-screen extent; a reserve labels below it, so the labels of a
-        // regiment and of the reserve standing right behind it don't overprint each other
-        const hy = R.routing ? 8 : Math.abs(R.sin) * (R.front - R.back) / 2 + Math.abs(R.cos) * R.halfW;
-        const below = R.order === 'support';
-        const ly = below ? cy + Math.round((hy + 8) * D) : cy - Math.round((hy + 8) * D) - cv.height * k;
-        ctx.drawImage(cv, cx - ((cv.width * k) >> 1), ly, cv.width * k, cv.height * k);
+        // the label goes under the footprint (as it is seen on the screen), or over it
+        labels.push({ x: (f0[0] + f1[0] + b0[0] + b1[0]) / 4, y: Math.max(f0[1], f1[1], b0[1], b1[1]) + 3 * k, y2: Math.min(f0[1], f1[1], b0[1], b1[1]) - 3 * k, text: `${R.name} ${R.n} · ${ON[R.order] || R.order}`, col: R.engaged > 0.15 ? '#ff8c80' : '#ffffff' });
       }
+      // labels never overprint each other: below the footprint, else above it, else nudged down
+      ctx.globalAlpha = 1;
+      const placed = [];
+      const free = (x, y, w, h) => placed.every((q) => x + w <= q.x || q.x + q.w <= x || y + h <= q.y || q.y + q.h <= y);
+      for (const L of labels) {
+        const cv = S.text(L.text, L.col);
+        const w = cv.width * k, h = cv.height * k, x = Math.round(L.x - w / 2);
+        let y = Math.round(L.y);
+        if (!free(x, y, w, h)) {
+          if (L.y2 != null && free(x, Math.round(L.y2 - h), w, h)) y = Math.round(L.y2 - h);
+          else for (let i = 0; i < 6 && !free(x, y, w, h); i++) y += h;
+        }
+        placed.push({ x, y, w, h });
+        ctx.fillStyle = 'rgba(10, 8, 6, 0.6)';
+        ctx.fillRect(x - k, y - k, w + 2 * k, h + k);
+        ctx.drawImage(cv, x, y, w, h);
+      }
+    }
+
+    drawPings(ctx, B, D, ox, oy, n) {
+      const ev = B.events, now = B.time, S = TM.Sprites;
+      const k = D >= 0.999 ? n : 1;
+      for (let i = ev.length - 1; i >= 0; i--) {
+        const e = ev[i], age = now - e.time;
+        if (age > 3.2) break;
+        const P = PING[e.kind];
+        if (!P || e.x == null) continue;
+        const col = P[0] || TM.TEAMS[e.team].light;
+        for (let w = 0; w < 2; w++) {          // two rings, the second a little behind
+          const t = (age - w * 0.35) / P[2];
+          if (t < 0 || t >= 1) continue;
+          const e1 = 1 - (1 - t) * (1 - t);
+          const r = Math.max(3, Math.round(Math.min((8 + P[1] * e1) * D, 110 * e1 + 8) / k)); // close up a ping stays small
+          const cv = S.ring(Math.min(160, r & ~1), col);
+          ctx.globalAlpha = (1 - t) * (w ? 0.45 : 0.85);
+          const px = Math.round(e.x * D + ox), py = Math.round(e.y * D + oy);
+          ctx.drawImage(cv, px - Math.floor(cv.width / 2) * k, py - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
+        }
+      }
+      // the event under the mouse in the feed: a steady marker
+      const f = this.focusEvent;
+      if (f && f.x != null) {
+        const col = (PING[f.kind] && PING[f.kind][0]) || TM.TEAMS[f.team].light;
+        const r = Math.max(6, Math.round((24 + 6 * Math.sin(performance.now() / 160)) * D / k));
+        const cv = S.ring(Math.min(160, r & ~1), col);
+        ctx.globalAlpha = 0.95;
+        ctx.drawImage(cv, Math.round(f.x * D + ox) - Math.floor(cv.width / 2) * k, Math.round(f.y * D + oy) - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
+      }
+      ctx.globalAlpha = 1;
     }
 
     drawRing(ctx, u, col, D, ox, oy, n) {
@@ -223,20 +383,56 @@
       ctx.drawImage(cv, px - Math.floor(cv.width / 2) * n, py - Math.floor(cv.height / 2) * n, cv.width * n, cv.height * n);
     }
 
+    // Arrows in flight leave a short streak (where the arrow was ~1/20 s ago) and a moving shadow
+    // on the ground: a volley reads as a dark rain sweeping over the field, at any zoom.
+    // Position along the flight at parameter s (see Battle.updateArrows).
     drawArrowShadows(ctx, arrows, D, ox, oy, n, vx0, vy0, vx1, vy1) {
       if (!arrows.length) return;
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      const w = D < 0.999 ? 1 : 2 * n;
+      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      ctx.lineWidth = D < 0.999 ? 1 : n;
+      ctx.beginPath();
       for (let i = 0; i < arrows.length; i++) {
         const p = arrows[i];
         if (p.x < vx0 || p.x > vx1 || p.y < vy0 || p.y > vy1) continue;
-        ctx.fillRect(Math.round(p.x * D + ox), Math.round(p.y * D + oy), w, n);
+        const back = Math.min(0.05, 16 / (360 * D)) / p.T; // ~ 1/20 s of flight, at most 16 device px
+        const s0 = Math.max(0, (p.s || 0) - back);
+        const qx = p.x0 + (p.tx - p.x0) * s0, qy = p.y0 + (p.ty - p.y0) * s0;
+        ctx.moveTo(Math.round(qx * D + ox) + 0.5, Math.round(qy * D + oy) + 0.5);
+        ctx.lineTo(Math.round(p.x * D + ox) + 0.5, Math.round(p.y * D + oy) + 0.5);
       }
+      ctx.stroke();
     }
 
     drawArrows(ctx, arrows, D, ox, oy, n, si, K, vx0, vy0, vx1, vy1) {
       if (!arrows.length) return;
       const spr = TM.Sprites.arrows[si];
+      const close = D >= 1.5;
+      // streaks: the arrow itself far away, a faint motion trail behind the sprite close up
+      ctx.strokeStyle = close ? 'rgba(244,239,226,0.28)' : 'rgba(46,30,15,0.85)';
+      ctx.lineWidth = close ? Math.max(1, n >> 1) : 1;
+      ctx.beginPath();
+      for (let i = 0; i < arrows.length; i++) {
+        const p = arrows[i];
+        if (p.x < vx0 || p.x > vx1 || p.y < vy0 - 100 || p.y > vy1 + 100) continue;
+        const s = p.s || 0;
+        const back = Math.min(0.05, 16 / (360 * D)) / p.T;
+        const s0 = Math.max(0, s - back);
+        const qx = p.x0 + (p.tx - p.x0) * s0, qy = p.y0 + (p.ty - p.y0) * s0;
+        const qz = 6 * (1 - s0) + 4 * p.h * s0 * (1 - s0);
+        ctx.moveTo(Math.round(qx * D + ox) + 0.5, Math.round((qy - qz * K) * D + oy) + 0.5);
+        ctx.lineTo(Math.round(p.x * D + ox) + 0.5, Math.round((p.y - p.z * K) * D + oy) + 0.5);
+      }
+      ctx.stroke();
+      if (!close && D < 0.52) {
+        // far away: a light point for the arrowhead is all that is left of the sprite
+        ctx.fillStyle = '#e8e2d0';
+        for (let i = 0; i < arrows.length; i++) {
+          const p = arrows[i];
+          if (p.x < vx0 || p.x > vx1 || p.y < vy0 - 100 || p.y > vy1 + 100) continue;
+          ctx.fillRect(Math.round(p.x * D + ox), Math.round((p.y - p.z * K) * D + oy), 1, 1);
+        }
+        return;
+      }
       for (let i = 0; i < arrows.length; i++) {
         const p = arrows[i];
         if (p.x < vx0 || p.x > vx1 || p.y < vy0 - 100 || p.y > vy1 + 100) continue;
@@ -267,22 +463,48 @@
           ctx.fillRect(Math.round(x * D + ox), Math.round((y - pz[i] * K) * D + oy), s, s);
         }
       }
-      // sparks
+      // sparks, and wood splinters of broken lances
       ctx.fillStyle = '#ffe28a';
       for (let i = 0; i < cnt; i++) {
         if (type[i] !== 1) continue;
         ctx.fillRect(Math.round(px[i] * D + ox), Math.round((py[i] - pz[i] * K) * D + oy), n, n);
       }
-      // dust puffs: chunky pixel clouds fading out
-      ctx.fillStyle = '#b5a47c';
+      ctx.fillStyle = '#8b5e31';
       for (let i = 0; i < cnt; i++) {
-        if (type[i] !== 2) continue;
-        const x = px[i], y = py[i];
-        if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
-        const k = life[i] / maxLife[i];
-        ctx.globalAlpha = k * 0.55;
-        const s = Math.max(1, Math.round(size[i] * 0.6 * Math.min(1, D))) * (far ? 1 : n);
-        ctx.fillRect(Math.round(x * D + ox) - (s >> 1), Math.round((y - pz[i] * K) * D + oy) - (s >> 1), s, s);
+        if (type[i] !== 3) continue;
+        const x = Math.round(px[i] * D + ox), y = Math.round((py[i] - pz[i] * K) * D + oy);
+        ctx.fillRect(x, y, n, n); ctx.fillRect(x + (i & 1 ? n : -n), y - n, n, n);
+      }
+      // dust puffs: chunky pixel clouds fading out (4 alpha steps: few state changes)
+      ctx.fillStyle = '#b5a47c';
+      for (let b = 3; b >= 0; b--) {
+        ctx.globalAlpha = (b + 0.6) / 4 * 0.55;
+        for (let i = 0; i < cnt; i++) {
+          if (type[i] !== 2) continue;
+          const k = life[i] / maxLife[i];
+          if ((k * 4 | 0) !== b && !(b === 3 && k >= 1)) continue;
+          const x = px[i], y = py[i];
+          if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
+          const s = Math.max(1, Math.round(size[i] * 0.6 * Math.min(1, D))) * (far ? 1 : n);
+          const qx = Math.round(x * D + ox) - (s >> 1), qy = Math.round((y - pz[i] * K) * D + oy) - (s >> 1);
+          if (s < 3 * n) ctx.fillRect(qx, qy, s, s);
+          else { const c = far ? 1 : n; ctx.fillRect(qx + c, qy, s - 2 * c, s); ctx.fillRect(qx, qy + c, c, s - 2 * c); ctx.fillRect(qx + s - c, qy + c, c, s - 2 * c); } // rounded puff
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // shock rings of heavy blows: a pixel ellipse growing over the ground and fading
+    drawWaves(ctx, fx, D, ox, oy, n) {
+      const list = fx.waves;
+      if (!list.length || D < 0.3) return;
+      const S = TM.Sprites, k = D >= 0.999 ? n : 1;
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i], t = e.t / e.life;
+        const r = Math.max(3, Math.round(e.r * (0.35 + 0.9 * (1 - (1 - t) * (1 - t))) * D / k));
+        const cv = S.ring(Math.min(160, r & ~1), e.strong ? '#e9dcb8' : '#f4efe2');
+        ctx.globalAlpha = (1 - t) * (e.strong ? 0.8 : 0.6);
+        ctx.drawImage(cv, Math.round(e.x * D + ox) - Math.floor(cv.width / 2) * k, Math.round(e.y * D + oy) - Math.floor(cv.height / 2) * k, cv.width * k, cv.height * k);
       }
       ctx.globalAlpha = 1;
     }
@@ -324,7 +546,7 @@
           ctx.fillStyle = hpR > 0.5 ? '#7bd14b' : hpR > 0.25 ? '#e8c23a' : '#e2452f';
           ctx.fillRect(bx + k, by + k, Math.max(1, Math.round(wa * hpR)) * k, k);
         }
-        if (u.fleeing && D >= 0.4) {
+        if (u.fleeing && D >= 0.4 && (D >= 1.5 || (u.id & 1) === 0)) {
           const f = S.flag;
           ctx.drawImage(f, px + k, top - (f.height + 1) * k, f.width * k, f.height * k);
         }

@@ -9,6 +9,7 @@
 <body>
   <div id="app" class="mode-setup">
     <canvas id="view"></canvas>
+    <div id="vignette"></div>
 
     <header id="topbar">
       <div class="logo">TOTAL<b>MASSACRE</b></div>
@@ -19,6 +20,7 @@
           <div class="hud-big" id="hud-alive-0">0</div>
           <div class="hud-sub"><span title="Погибли">☠ <b id="hud-dead-0">0</b></span><span title="Сбежали с поля">⚑ <b id="hud-fled-0">0</b></span><span title="Сейчас в панике">! <b id="hud-panic-0">0</b></span></div>
           <div class="hud-types" id="hud-types-0"></div>
+          <div class="hud-regs" id="hud-regs-0"></div>
         </div>
         <div class="hud-mid">
           <div class="hud-time" id="hud-time">0:00</div>
@@ -30,6 +32,7 @@
           <div class="hud-big" id="hud-alive-1">0</div>
           <div class="hud-sub"><span title="Погибли">☠ <b id="hud-dead-1">0</b></span><span title="Сбежали с поля">⚑ <b id="hud-fled-1">0</b></span><span title="Сейчас в панике">! <b id="hud-panic-1">0</b></span></div>
           <div class="hud-types" id="hud-types-1"></div>
+          <div class="hud-regs" id="hud-regs-1"></div>
         </div>
       </div>
 
@@ -68,6 +71,8 @@
     </div>
 
     <div id="feed"></div>
+    <canvas id="minimap" title="Карта поля: клик или перетаскивание — перейти (N — скрыть)"></canvas>
+    <div id="banner"><div class="bn-title"></div><div class="bn-sub"></div></div>
     <div id="tooltip"></div>
     <div id="perf"></div>
     <div id="hint">Колесо — зум · перетаскивание — камера · клик по бойцу — следить</div>

@@ -630,7 +630,7 @@
     const last = B.tac.lastEvent[k] || -99;
     if (B.time - last < (key === 'rout' ? 2.5 : 8)) return;
     B.tac.lastEvent[k] = B.time;
-    B.event(text, R.team);
+    B.event(text, R.team, R.n ? R.cx : R.fcx, R.n ? R.cy : R.fcy, key, R.type);
   }
 
   // ---------------------------------------------------------------- build & update

@@ -8,7 +8,7 @@
   const R = Math.random;
   const gauss = () => (R() + R() + R() - 1.5) * 0.8165;
 
-  const P_BLOOD = 0, P_SPARK = 1, P_DUST = 2;
+  const P_BLOOD = 0, P_SPARK = 1, P_DUST = 2, P_SPLINTER = 3;
 
   function makeCanvas(w, h) {
     const c = document.createElement('canvas');
@@ -117,6 +117,7 @@
       this.n = 0;
       this.texts = [];
       this.impacts = [];
+      this.waves = [];     // shock rings spreading over the ground (charges, club blows)
       this.shakeAmt = 0;
       this.reset();
     }
@@ -127,6 +128,7 @@
       this.n = 0;
       this.texts.length = 0;
       this.impacts.length = 0;
+      this.waves.length = 0;
       this.shakeAmt = 0;
     }
 
@@ -164,6 +166,70 @@
       }
     }
 
+    // Ambient effects read from the battle state (visual RNG only, never the simulation's):
+    // hooves throw up dust behind galloping horses and a charging line raises it at its feet.
+    tick(B, dt) {
+      const T = B.tac;
+      if (!T) return;
+      for (const Rg of T.regs) {
+        if (Rg.alive === 0) continue;
+        const cav = Rg.role === 'cavalry';
+        if (!cav && !(Rg.order === 'charge' && Rg.speed > 0)) continue;
+        for (const u of Rg.members) {
+          if (u.state !== 0 || u.z > 0.5) continue;
+          const sp = Math.hypot(u.vx, u.vy);
+          if (cav) {
+            if (sp < 40 || R() > dt * 6 * sp / u.def.speed) continue;
+            const ix = u.vx / sp, iy = u.vy / sp;
+            this.spawn(P_DUST, u.x - ix * 8 + gauss() * 3, u.y - iy * 6 + gauss() * 2 + 1, 1,
+              -ix * 14 + gauss() * 9, -iy * 10 + gauss() * 6, 6 + R() * 10, 0.6 + R() * 0.7, 2.5 + R() * 2.5);
+          } else {
+            if (sp < 28 || R() > dt * 0.6) continue;
+            this.spawn(P_DUST, u.x + gauss() * 2, u.y + 2, 1, gauss() * 8, gauss() * 5, 4 + R() * 6, 0.45 + R() * 0.4, 1.8 + R() * 1.5);
+          }
+        }
+      }
+    }
+
+    // a lance breaking on a planted pike: splinters of wood
+    splinters(x, y, z, n) {
+      for (let k = 0; k < n; k++) {
+        const a = R() * Math.PI * 2, sp = 40 + R() * 90;
+        this.spawn(P_SPLINTER, x, y, z + 10, Math.cos(a) * sp, Math.sin(a) * sp, 80 + R() * 110, 0.6, 1);
+      }
+    }
+
+    // a ring of air and dust spreading over the ground from a heavy blow
+    shock(x, y, r, strong) {
+      if (this.waves.length > 40) this.waves.shift();
+      this.waves.push({ x, y, r, t: 0, life: strong ? 0.42 : 0.3, strong: !!strong });
+    }
+
+    // the ground cracked by a giant's club (baked into the field)
+    crack(x, y) {
+      const g = this.g;
+      g.globalAlpha = 0.55;
+      g.fillStyle = '#2a2016';
+      for (let k = 0; k < 5; k++) {
+        let a = R() * Math.PI * 2, px = x, py = y;
+        const len = 5 + R() * 7;
+        for (let i = 0; i < len; i++) {
+          a += (R() - 0.5) * 0.7;
+          px += Math.cos(a); py += Math.sin(a) * 0.6;
+          g.fillRect(Math.round(px), Math.round(py), 1, 1);
+        }
+      }
+      g.globalAlpha = 1;
+    }
+
+    // a giant's footfall
+    stomp(x, y) {
+      for (let k = 0; k < 4; k++) {
+        const a = R() * Math.PI * 2;
+        this.spawn(P_DUST, x + Math.cos(a) * 6, y + Math.sin(a) * 3 + 2, 1, Math.cos(a) * 22, Math.sin(a) * 12, 5 + R() * 6, 0.5 + R() * 0.4, 3 + R() * 2);
+      }
+    }
+
     // Short pixel flash where a blow lands. kind: hit | slash | crit | block
     impact(x, y, z, nx, ny, kind, h) {
       if (this.impacts.length > 260) this.impacts.shift();
@@ -196,6 +262,7 @@
           this.px[i] += this.vx[i] * dt; this.py[i] += this.vy[i] * dt; this.pz[i] += this.vz[i] * dt;
           if (this.pz[i] <= 0) {
             if (t === P_BLOOD) this.stampBloodDrop(this.px[i], this.py[i], this.size[i]);
+            else if (t === P_SPLINTER && R() < 0.5) { this.g.fillStyle = '#5a3c1e'; this.g.fillRect(Math.round(this.px[i]), Math.round(this.py[i]), 1, 1); }
             this.life[i] = 0;
           }
         }
@@ -215,6 +282,13 @@
         tx.t += dt; tx.z += dt * 22;
         if (tx.t >= tx.life) this.texts.splice(i, 1);
       }
+      let wv = 0;
+      for (let i = 0; i < this.waves.length; i++) {
+        const e = this.waves[i];
+        e.t += dt;
+        if (e.t < e.life) this.waves[wv++] = e;
+      }
+      this.waves.length = wv;
       let w = 0;
       for (let i = 0; i < this.impacts.length; i++) {
         const e = this.impacts[i];
@@ -273,8 +347,14 @@
       this.stampBlood(u.x, u.y + 1, u.r * 1.15);
       TM.Sprites.stampCorpse(this.g, u);
     }
+
+    // a regiment's standard dropped where the regiment broke or died
+    stampStandard(x, y, team) {
+      const cv = TM.Sprites.fallen[team];
+      this.g.drawImage(cv, Math.round(x) - 9, Math.round(y) - 6);
+    }
   }
 
-  Effects.P_BLOOD = P_BLOOD; Effects.P_SPARK = P_SPARK; Effects.P_DUST = P_DUST;
+  Effects.P_BLOOD = P_BLOOD; Effects.P_SPARK = P_SPARK; Effects.P_DUST = P_DUST; Effects.P_SPLINTER = P_SPLINTER;
   TM.Effects = Effects;
 })(window.TM = window.TM || {});

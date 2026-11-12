@@ -37,7 +37,9 @@ async function uiTests(b) {
   await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 800, y: 450, deltaX: 0, deltaY: -300 }); await sleep(200);
   check('wheel zooms and disables the auto camera', (await b.ev('TM.Game.cam.zoom')) > z0 && !(await b.ev('TM.Game.cam.auto')));
   for (let i = 0; i < 6; i++) { await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 800, y: 450, deltaX: 0, deltaY: -120 }); await sleep(30); }
-  check('close zoom snaps to whole pixels', await b.ev(`(() => { const c = TM.Game.cam, D = c.view() * c.dpr; return D >= 1 && Math.abs(D - Math.round(D)) < 1e-9; })()`));
+  check('the zoom glides (continuous view while it moves)', await b.ev('TM.Game.cam.moving'));
+  await sleep(600);
+  check('close zoom settles on whole pixels', await b.ev(`(() => { const c = TM.Game.cam, D = c.view() * c.dpr; return D >= 1 && Math.abs(D - Math.round(D)) < 1e-9; })()`));
   await b.key('Space', ' ');
   await b.ev(`(() => { const u = TM.Game.battle.alive[0][0]; TM.Game.cam.x = u.x; TM.Game.cam.y = u.y; })()`); await sleep(100);
   const u = await b.ev(`(() => { const u = TM.Game.battle.alive[0][0]; return { x: u.x, y: u.y - 4 }; })()`);

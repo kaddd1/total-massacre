@@ -67,6 +67,8 @@
       this.resultShown = false;
       this.hover = null;
       this.cam.follow = null;
+      this.cam.aim = null;
+      this.slowT = 0; this.endSeen = false;
       TM.UI.updateHud(this.battle, true);
     },
 
@@ -97,6 +99,13 @@
       TM.Audio.battleStart(this.battle);
       TM.UI.setMode('battle');
       TM.UI.syncControls();
+      this.announce();
+    },
+
+    // "To battle!" with the size of the armies
+    announce() {
+      const s = this.battle.stats;
+      TM.UI.banner('К БОЮ!', `${s[0].deployed} против ${s[1].deployed}`);
     },
 
     restart() {
@@ -110,6 +119,7 @@
       TM.UI.hideResult();
       TM.UI.setMode('battle');
       TM.UI.syncControls();
+      this.announce();
     },
 
     toSetup() {
@@ -135,7 +145,7 @@
 
     toggleAuto() {
       this.cam.auto = !this.cam.auto;
-      if (this.cam.auto) this.cam.follow = null;
+      if (this.cam.auto) { this.cam.follow = null; this.cam.aim = null; this.cam.stop(); }
       TM.UI.syncControls();
     },
 
@@ -147,8 +157,16 @@
         const side = R.vw > 1100 ? 340 : R.vw > 800 ? 300 : 0;
         this.cam.fit(R.vw, R.vh, this.armyRect(), { l: side, r: side, t: 90, b: 140 });
       } else {
-        this.cam.fit(R.vw, R.vh, null, { l: 0, r: 0, t: 80, b: 60 });
+        this.cam.fit(R.vw, R.vh, null, { l: 0, r: 0, t: 80, b: 60 }, true);
       }
+      TM.UI.syncControls();
+    },
+
+    // fly the camera to a point of the field (event feed, minimap, regiment chips)
+    flyTo(x, y, zoom) {
+      this.cam.auto = false;
+      this.cam.follow = null;
+      this.cam.flyTo(x, y, zoom);
       TM.UI.syncControls();
     },
 
@@ -186,7 +204,11 @@
 
       const B = this.battle;
       if (this.mode === 'battle' && !this.paused) {
-        this.acc += dtReal * this.speed;
+        // the moment the battle is decided plays in slow motion for a second and a half
+        if (B.endTime && !this.endSeen) { this.endSeen = true; this.slowT = 1.5; }
+        const slow = this.slowT <= 0 ? 1 : this.slowT > 0.4 ? 0.4 : 1 - 0.6 * this.slowT / 0.4;
+        if (this.slowT > 0) this.slowT -= dtReal;
+        this.acc += dtReal * this.speed * slow;
         let steps = 0;
         const t0 = performance.now();
         const maxSteps = Math.max(C.MAX_STEPS_PER_FRAME, Math.ceil(this.speed * 2));
@@ -196,6 +218,7 @@
           steps++;
         }
         if (steps >= maxSteps) this.acc = 0; // can't keep up: slow down instead of spiralling
+        if (steps) this.record(B);
         this.stepMs += (performance.now() - t0 - this.stepMs) * 0.1;
         this.fx.decayShake(dtReal);
       }
@@ -203,14 +226,28 @@
       this.keyboardPan(dtReal);
       this.cam.update(dtReal, B, this.renderer.vw, this.renderer.vh);
       this.renderer.render(B, this.fx, this.cam, this.hover, this.cam.follow);
+      TM.UI.drawMinimap(B, this.cam, this.renderer);
       TM.UI.updateHud(B);
       TM.Audio.frame(dtReal, this.speed, this.cam, this.renderer.vw, this.renderer.vh, this.mode === 'battle' && !this.paused && B.state === 'running', B);
 
       if (B.state === 'over' && !this.resultShown) {
         this.resultShown = true;
+        this.record(B, true);
         TM.UI.showResult(B);
       }
       requestAnimationFrame((t) => this.frame(t));
+    },
+
+    // the course of the battle for the result chart: soldiers in the ranks of each army, twice a second
+    record(B, final) {
+      let h = this.hist;
+      if (!h || h.B !== B) h = this.hist = { B, t: [], a: [[], []], next: 0 };
+      const t = B.endTime ? Math.min(B.time, B.endTime) : B.time;   // the chart ends with the battle
+      if (h.t.length && h.t[h.t.length - 1] >= t) return;
+      if (!final && t < h.next && t !== B.endTime) return;
+      h.next = t + 0.5;
+      h.t.push(t);
+      for (let t = 0; t < 2; t++) h.a[t].push(B.stats[t].alive - B.stats[t].fleeing);
     },
 
     keyboardPan(dt) {
@@ -316,6 +353,7 @@
         else if (code === 'KeyH') TM.UI.toggleHelp();
         else if (code === 'KeyM') TM.Audio.toggleMute();
         else if (code === 'KeyT') { R.showTactics = !R.showTactics; }
+        else if (code === 'KeyN') TM.UI.toggleMinimap();
         else if (code === 'Equal' || code === 'NumpadAdd') { this.cam.auto = false; this.cam.stepZoom(1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
         else if (code === 'Minus' || code === 'NumpadSubtract') { this.cam.auto = false; this.cam.stepZoom(-1, R.vw / 2, R.vh / 2, R.vw, R.vh); }
         else if (/^Digit[1-4]$/.test(code)) this.setSpeed([1, 2, 4, 8][+code.slice(5) - 1]);
@@ -342,9 +380,10 @@
         this.start();
         const skip = +q.get('skip') || 0;
         for (let t = 0; t < skip && this.battle.state !== 'over'; t += C.DT) this.battle.step(C.DT);
+        if (skip) { document.getElementById('banner').className = ''; TM.UI.feedSeen = this.battle.events.length; }
         if (q.has('speed')) this.setSpeed(+q.get('speed'));
       }
-      if (q.has('zoom')) { this.cam.zoom = +q.get('zoom'); this.cam.auto = false; }
+      if (q.has('zoom')) { this.cam.stop(); this.cam.zoom = +q.get('zoom'); this.cam.auto = false; }
       if (q.has('x')) this.cam.x = +q.get('x');
       if (q.has('y')) this.cam.y = +q.get('y');
       if (q.has('follow')) {

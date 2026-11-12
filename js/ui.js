@@ -4,6 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
   const SHORT = { sword: 'Меч', spear: 'Коп', archer: 'Лук', knight: 'Рыц', giant: 'Вел' };
+  const CHART_COL = ['#e5544a', '#4a8fee'];
 
   const UI = {
     game: null,
@@ -29,6 +30,7 @@
       document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('.modal').classList.add('hidden')));
       TM.Editor.init(game);
       TM.Audio.bindUI();
+      this.initMinimap();
       this.syncFromSetup();
     },
 
@@ -200,6 +202,8 @@
         $('result').classList.add('hidden');
         $('feed').innerHTML = '';
       }
+      if (this.game.renderer) this.game.renderer.focusEvent = null;
+      $('banner').className = '';
       this.feedSeen = 0;
     },
 
@@ -232,6 +236,7 @@
         const el = $('hud-types-' + t);
         if (el._last !== types) { el.innerHTML = types; el._last = types; }
       }
+      this.updateChips(B);
       const a0 = B.stats[0].alive, a1 = B.stats[1].alive, sum = a0 + a1 || 1;
       $('bar-0').style.width = (a0 / sum * 100) + '%';
       $('bar-1').style.width = (a1 / sum * 100) + '%';
@@ -247,18 +252,123 @@
       $('perf').textContent = `${Math.round(g.fps)} FPS · ${B.stats[0].alive + B.stats[1].alive} бойцов · ${g.stepMs.toFixed(1)} мс/кадр сим.`;
 
       // kill feed
-      while (this.feedSeen < B.events.length) this.pushFeed(B.events[this.feedSeen++]);
+      while (this.feedSeen < B.events.length) {
+        const ev = B.events[this.feedSeen++];
+        this.pushFeed(ev);
+        if (B.time - ev.time < 3) this.bannerFor(ev, B);
+      }
+    },
+
+    // ---------------- regiment chips ----------------
+    buildChips(B) {
+      this.chipB = B;
+      this.chips = [];
+      const g = this.game;
+      for (let t = 0; t < 2; t++) {
+        const el = $('hud-regs-' + t);
+        el.innerHTML = '';
+        if (!B.tac) continue;
+        const regs = B.tac.regs.filter((r) => r.team === t).sort((a, b) => TM.UNIT_ORDER.indexOf(a.type) - TM.UNIT_ORDER.indexOf(b.type) || a.id - b.id);
+        for (const R of regs) {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          const cv = document.createElement('canvas'); cv.width = 16; cv.height = 18;
+          this.chipIcon(cv, R.type, t);
+          const bar = document.createElement('b');
+          chip.appendChild(cv); chip.appendChild(bar);
+          chip.addEventListener('click', () => { if (R.alive) g.flyTo(R.n ? R.cx : R.fcx, R.n ? R.cy : R.fcy, Math.max(g.cam.goalZoom(), 2 / g.cam.dpr)); });
+          chip.addEventListener('mouseenter', () => { g.renderer.focusReg = R; });
+          chip.addEventListener('mouseleave', () => { if (g.renderer.focusReg === R) g.renderer.focusReg = null; });
+          el.appendChild(chip);
+          this.chips.push({ R, chip, bar, st: '', w: -1, tip: '' });
+        }
+      }
+      if (g.renderer) g.renderer.focusReg = null;
+    },
+
+    // the largest sprite size of the unit that fits the chip
+    chipIcon(cv, type, team) {
+      const S = TM.Sprites, c = cv.getContext('2d');
+      for (const set of S.sets) {
+        const fr = set.meta[type].idle[set.nd === 16 ? 3 : 2][0].body;
+        if (fr.w <= cv.width + 2 && fr.h <= cv.height + 2) {
+          c.imageSmoothingEnabled = false;
+          c.drawImage(set.color[team], fr.x, fr.y, fr.w, fr.h, Math.round((cv.width - fr.w) / 2), Math.round((cv.height - fr.h) / 2) + 1, fr.w, fr.h);
+          return;
+        }
+      }
+    },
+
+    updateChips(B) {
+      if (B !== this.chipB) this.buildChips(B);
+      const ON = TM.Tactics.ORDER_NAME;
+      for (const c of this.chips) {
+        const R = c.R;
+        let mor = 0, mn = 0;
+        if (R.n && !R.def.fearless) for (const u of R.members) if (u.state === 0 && !u.fleeing) { mor += u.morale; mn++; }
+        const morale = mn ? mor / mn : 100;
+        const st = R.alive === 0 ? 'dead' : R.routing || R.n === 0 ? 'rout' : R.engaged > 0.15 ? 'eng' : morale < 38 ? 'waver' : '';
+        if (st !== c.st) { c.chip.className = 'chip' + (st ? ' ' + st : ''); c.st = st; }
+        const w = Math.round(14 * R.alive / R.n0);
+        if (w !== c.w) { c.bar.style.width = w + 'px'; c.w = w; }
+        const tip = `${R.name[0].toUpperCase() + R.name.slice(1)}: ${R.alive} из ${R.n0}` +
+          (R.alive === 0 ? ' — уничтожены' : R.routing || R.n === 0 ? ' — бегут' : ` — ${ON[R.order] || R.order}` + (R.def.fearless ? '' : `, мораль ${Math.round(morale)}%`));
+        if (tip !== c.tip) { c.chip.title = tip; c.tip = tip; }
+      }
+    },
+
+    // unit portrait as an <img> source (cached)
+    icon(type, team) {
+      const key = type + team;
+      this.icons = this.icons || {};
+      if (!this.icons[key]) {
+        const c = document.createElement('canvas'); c.width = c.height = 40;
+        TM.Render.drawIcon(c, type, team);
+        this.icons[key] = c.toDataURL();
+      }
+      return this.icons[key];
+    },
+
+    // A feed line; an event with a place on the field shows it when hovered and flies the camera
+    // there on click.
+    // a big title over the field for a few seconds
+    banner(title, sub, cls) {
+      const el = $('banner');
+      el.className = cls || '';
+      el.querySelector('.bn-title').textContent = title;
+      el.querySelector('.bn-sub').textContent = sub || '';
+      void el.offsetWidth; // restart the animation
+      el.classList.add('show');
+    },
+
+    // turning points of the battle get a title as well as a feed line
+    bannerFor(ev, B) {
+      if (ev.kind === 'win') this.banner('ПОБЕДА', TM.TEAMS[ev.team].full, 't' + ev.team);
+      else if (ev.kind === 'break' && !B.endTime) this.banner(`${TM.TEAMS[ev.team].name.toUpperCase()} ДРОГНУЛИ!`, 'армия бежит с поля', 'warn');
     },
 
     pushFeed(ev) {
-      const feed = $('feed');
+      const feed = $('feed'), g = this.game;
       const d = document.createElement('div');
-      d.className = 'feed-item t' + ev.team;
-      d.textContent = `${TM.U.fmtTime(ev.time)}  ${ev.text}`;
+      d.className = 'feed-item t' + ev.team + (ev.kind ? ' k-' + ev.kind : '') + (ev.x != null ? ' go' : '');
+      if (ev.type) { const im = document.createElement('img'); im.src = this.icon(ev.type, ev.team); im.alt = ''; d.appendChild(im); }
+      const tx = document.createElement('span');
+      tx.innerHTML = `<i>${TM.U.fmtTime(ev.time)}</i> `;
+      tx.appendChild(document.createTextNode(ev.text));
+      d.appendChild(tx);
+      if (ev.x != null) {
+        d.title = 'Показать на поле';
+        const big = ev.kind === 'break' || ev.kind === 'win' || ev.kind === 'rally';
+        d.addEventListener('click', () => g.flyTo(ev.x, ev.y, Math.max(g.cam.goalZoom(), (big ? 1 : 2) / g.cam.dpr)));
+        d.addEventListener('mouseenter', () => { g.renderer.focusEvent = ev; });
+        d.addEventListener('mouseleave', () => { if (g.renderer.focusEvent === ev) g.renderer.focusEvent = null; });
+      }
       feed.prepend(d);
-      while (feed.children.length > 7) feed.lastChild.remove();
-      setTimeout(() => d.classList.add('fade'), 6000);
-      setTimeout(() => d.remove(), 6700);
+      const drop = (el) => { if (g.renderer.focusEvent && el._ev === g.renderer.focusEvent) g.renderer.focusEvent = null; el.remove(); };
+      d._ev = ev;
+      while (feed.children.length > 7) drop(feed.lastChild);
+      setTimeout(() => d.classList.add('fade'), 7000);
+      setTimeout(() => { if (d.parentNode) drop(d); }, 7700);
     },
 
     // ---------------- tooltip ----------------
@@ -311,6 +421,7 @@
             <tr><th>Отряд</th><th class="r">Красные: было → осталось</th><th class="r">Убийств</th><th class="b">Синие: было → осталось</th><th class="b">Убийств</th></tr>
             ${rows}
           </table>
+          ${this.chartHtml()}
           ${mvpHtml}
           <div class="result-buttons">
             <button class="btn primary" id="res-restart">↻ Реванш (R)</button>
@@ -319,9 +430,199 @@
           </div>
         </div>`;
       el.classList.remove('hidden');
+      this.initChart(B);
       $('res-restart').onclick = () => this.game.restart();
       $('res-view').onclick = () => el.classList.add('hidden');
       $('res-new').onclick = () => this.game.toSetup();
+    },
+
+    // ---------------- battle chart (result screen) ----------------
+    // How many soldiers each army had in its ranks over the battle, with the moments regiments broke.
+    // Series colours are the team hues stepped for the dark card (checked for colour-blind separation).
+    chartHtml() {
+      const h = this.game.hist;
+      if (!h || h.t.length < 3) return '';
+      return `<div class="rchart">
+        <div class="rchart-head"><span class="rchart-title">Ход битвы: бойцов в строю</span>
+          <span class="rchart-legend"><span><i class="lk" style="background:${CHART_COL[0]}"></i>Красные</span><span><i class="lk" style="background:${CHART_COL[1]}"></i>Синие</span><span><i class="tk"></i>полк бежит</span></span></div>
+        <div class="rchart-wrap"><canvas id="rchart"></canvas><div class="rchart-tip"></div></div>
+      </div>`;
+    },
+
+    initChart(B) {
+      const cv = $('rchart');
+      if (!cv) return;
+      const h = this.game.hist, tip = cv.parentNode.querySelector('.rchart-tip');
+      const marks = B.events.filter((e) => e.kind === 'rout' || e.kind === 'break');
+      const draw = (hi) => this.drawChart(cv, h, marks, hi);
+      draw(-1);
+      const pick = (e) => {
+        const r = cv.getBoundingClientRect(), g = this.chartGeom;
+        const t = (e.clientX - r.left - g.L) / g.pw * g.t1;
+        let best = 0;
+        for (let i = 1; i < h.t.length; i++) if (Math.abs(h.t[i] - t) < Math.abs(h.t[best] - t)) best = i;
+        return best;
+      };
+      cv.addEventListener('mousemove', (e) => {
+        const i = pick(e), g = this.chartGeom;
+        draw(i);
+        tip.textContent = '';
+        const head = document.createElement('div'); head.className = 'tt-time'; head.textContent = TM.U.fmtTime(h.t[i]); tip.appendChild(head);
+        for (let t = 0; t < 2; t++) {
+          const row = document.createElement('div');
+          const k = document.createElement('i'); k.className = 'lk'; k.style.background = CHART_COL[t];
+          const v = document.createElement('b'); v.textContent = h.a[t][i];
+          const n = document.createElement('span'); n.textContent = ' ' + TM.TEAMS[t].name.toLowerCase();
+          row.appendChild(k); row.appendChild(v); row.appendChild(n); tip.appendChild(row);
+        }
+        const x = g.X(h.t[i]);
+        tip.style.display = 'block';
+        tip.style.left = (x + 12 + tip.offsetWidth > cv.clientWidth ? x - 12 - tip.offsetWidth : x + 12) + 'px';
+      });
+      cv.addEventListener('mouseleave', () => { draw(-1); tip.style.display = 'none'; });
+    },
+
+    drawChart(cv, h, marks, hi) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const W = cv.clientWidth, Hh = cv.clientHeight;
+      if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr); }
+      const c = cv.getContext('2d');
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, W, Hh);
+      const L = 34, Rm = 42, T = 6, Bm = 30, pw = W - L - Rm, ph = Hh - T - Bm;
+      const n = h.t.length, t1 = Math.max(1, h.t[n - 1]);
+      let vmax = 1;
+      for (let t = 0; t < 2; t++) for (const v of h.a[t]) if (v > vmax) vmax = v;
+      const step = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500].find((s) => vmax / s <= 4) || 5000;
+      const ymax = Math.ceil(vmax / step) * step;
+      const X = (t) => L + t / t1 * pw, Y = (v) => T + ph - v / ymax * ph;
+      this.chartGeom = { L, pw, t1, X };
+      c.font = '10px "Segoe UI", system-ui, sans-serif';
+      c.textBaseline = 'middle';
+      // grid & axes: solid hairlines one step off the card
+      c.lineWidth = 1;
+      c.strokeStyle = 'rgba(255, 235, 200, 0.08)';
+      c.fillStyle = '#9b917f';
+      c.textAlign = 'right';
+      for (let v = 0; v <= ymax; v += step) {
+        const y = Math.round(Y(v)) + 0.5;
+        c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke();
+        c.fillText(String(v), L - 6, y);
+      }
+      const ts = [5, 10, 15, 30, 60, 120, 300].find((s) => t1 / s <= 7) || 600;
+      c.textAlign = 'center'; c.textBaseline = 'top';
+      for (let t = 0; t <= t1 + 1e-6; t += ts) c.fillText(TM.U.fmtTime(t), Math.round(X(t)), T + ph + 15);
+      // area washes, then the lines (2px, round joins)
+      for (let t = 0; t < 2; t++) {
+        const a = h.a[t];
+        c.beginPath(); c.moveTo(X(h.t[0]), Y(0));
+        for (let i = 0; i < n; i++) c.lineTo(X(h.t[i]), Y(a[i]));
+        c.lineTo(X(h.t[n - 1]), Y(0)); c.closePath();
+        c.globalAlpha = 0.1; c.fillStyle = CHART_COL[t]; c.fill(); c.globalAlpha = 1;
+      }
+      c.lineWidth = 2; c.lineJoin = 'round'; c.lineCap = 'round';
+      for (let t = 0; t < 2; t++) {
+        const a = h.a[t];
+        c.strokeStyle = CHART_COL[t];
+        c.beginPath();
+        for (let i = 0; i < n; i++) { const x = X(h.t[i]), y = Y(a[i]); if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+        c.stroke();
+      }
+      // regiments that broke: ticks under the axis, in the colour of their army
+      for (const e of marks) {
+        if (e.time > t1) continue;
+        const x = Math.round(X(e.time)), y = T + ph + 3, big = e.kind === 'break';
+        c.fillStyle = CHART_COL[e.team];
+        c.beginPath(); c.moveTo(x, y); c.lineTo(x - (big ? 5 : 3.5), y + (big ? 8 : 6)); c.lineTo(x + (big ? 5 : 3.5), y + (big ? 8 : 6)); c.closePath(); c.fill();
+      }
+      // end values, unless they would collide (the legend and the tooltip carry them then)
+      const e0 = Y(h.a[0][n - 1]), e1 = Y(h.a[1][n - 1]);
+      c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = '#ebe4d6';
+      if (Math.abs(e0 - e1) >= 12) for (let t = 0; t < 2; t++) c.fillText(String(h.a[t][n - 1]), L + pw + 8, t ? e1 : e0);
+      // hover: crosshair snapped to the nearest sample, dots with a ring in the card colour
+      if (hi >= 0) {
+        const x = Math.round(X(h.t[hi])) + 0.5;
+        c.strokeStyle = 'rgba(255, 235, 200, 0.35)'; c.lineWidth = 1;
+        c.beginPath(); c.moveTo(x, T); c.lineTo(x, T + ph); c.stroke();
+        for (let t = 0; t < 2; t++) {
+          const y = Y(h.a[t][hi]);
+          c.fillStyle = '#1a1612'; c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2); c.fill();
+          c.fillStyle = CHART_COL[t]; c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill();
+        }
+      }
+    },
+
+    // ---------------- minimap ----------------
+    // The whole field: the ground layer (with its blood, bodies and fallen standards) refreshed every
+    // couple of seconds, the soldiers 10 times a second, the camera frame and event pings every frame.
+    initMinimap() {
+      const cv = $('minimap');
+      this.mm = { cv, ctx: cv.getContext('2d'), base: document.createElement('canvas'), dots: document.createElement('canvas'), gT: -1e9, dT: -1e9, w: 0, h: 0 };
+      const C = TM.CONFIG, g = this.game;
+      let drag = false;
+      const at = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * C.WORLD_W, y: (e.clientY - r.top) / r.height * C.WORLD_H }; };
+      cv.addEventListener('mousedown', (e) => { e.stopPropagation(); drag = true; const w = at(e); g.flyTo(w.x, w.y); g.cam.anim.dur = 0.3; });
+      window.addEventListener('mousemove', (e) => { if (!drag) return; const w = at(e); g.cam.stop(); g.cam.x = w.x; g.cam.y = w.y; g.cam.clamp(); });
+      window.addEventListener('mouseup', () => { drag = false; });
+      cv.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+    },
+
+    toggleMinimap() { $('minimap').classList.toggle('off'); },
+
+    drawMinimap(B, cam, R) {
+      const m = this.mm;
+      if (!m || this.game.mode !== 'battle' || m.cv.classList.contains('off')) return;
+      const C = TM.CONFIG, now = performance.now();
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = Math.round(m.cv.clientWidth * dpr), h = Math.round(m.cv.clientHeight * dpr);
+      if (!w || !h) return;
+      if (w !== m.w || h !== m.h) {
+        m.w = m.cv.width = m.base.width = m.dots.width = w; m.h = m.cv.height = m.base.height = m.dots.height = h;
+        m.gT = m.dT = -1e9;
+      }
+      const sx = w / C.WORLD_W, sy = h / C.WORLD_H;
+      if (now - m.gT > 2000) {
+        m.gT = now;
+        const b = m.base.getContext('2d');
+        b.imageSmoothingEnabled = true; b.imageSmoothingQuality = 'medium';
+        b.drawImage(this.game.fx.ground, 0, 0, w, h);
+        b.fillStyle = 'rgba(12, 10, 8, 0.28)'; b.fillRect(0, 0, w, h);
+      }
+      if (now - m.dT > 100) {
+        m.dT = now;
+        const d = m.dots.getContext('2d');
+        d.clearRect(0, 0, w, h);
+        d.drawImage(m.base, 0, 0);
+        const s = dpr >= 1.5 ? 2 : 1.5;
+        const cols = [['#ff6a58', '#ffb79a'], ['#5aa8ff', '#b7d6ff']];
+        for (let t = 0; t < 2; t++) {
+          for (let f = 0; f < 2; f++) {
+            d.fillStyle = cols[t][f];
+            d.globalAlpha = f ? 0.55 : 1;
+            for (const u of B.alive[t]) if (u.fleeing === !!f) d.fillRect(u.x * sx - s / 2, u.y * sy - s / 2, u.type === 'giant' ? s * 2 : s, u.type === 'giant' ? s * 2 : s);
+          }
+        }
+        d.globalAlpha = 1;
+      }
+      const c = m.ctx;
+      c.clearRect(0, 0, w, h);
+      c.drawImage(m.dots, 0, 0);
+      // pings of the latest events
+      const ev = B.events;
+      c.lineWidth = dpr;
+      for (let i = ev.length - 1; i >= 0; i--) {
+        const e = ev[i], age = B.time - e.time;
+        if (age > 2.5) break;
+        if (e.x == null) continue;
+        c.strokeStyle = e.kind === 'rout' || e.kind === 'break' ? '#ffb347' : e.kind === 'win' ? '#ffd34d' : TM.TEAMS[e.team].light;
+        c.globalAlpha = 1 - age / 2.5;
+        c.beginPath(); c.arc(e.x * sx, e.y * sy, (3 + age * 7) * dpr, 0, Math.PI * 2); c.stroke();
+      }
+      c.globalAlpha = 1;
+      // camera frame
+      const z = cam.view(), vw = R.vw / z, vh = R.vh / z;
+      c.strokeStyle = 'rgba(255, 228, 140, 0.95)'; c.lineWidth = Math.max(1, dpr);
+      c.strokeRect(Math.round((cam.x - vw / 2) * sx) + 0.5, Math.round((cam.y - vh / 2) * sy) + 0.5, Math.round(vw * sx), Math.round(vh * sy));
     },
 
     hideResult() { $('result').classList.add('hidden'); },

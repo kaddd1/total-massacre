@@ -103,8 +103,10 @@
       return this.endTime || this.time;
     }
 
-    event(text, team) {
-      this.events.push({ time: this.time, text, team });
+    // a line for the event feed; x, y (where it happened), kind and unit type are for the
+    // map pings and the feed icons only — nothing in the simulation reads them
+    event(text, team, x, y, kind, type) {
+      this.events.push({ time: this.time, text, team, x, y, kind, type });
     }
 
     // Rebuild alive lists, spatial grid, centroids, attacker counts.
@@ -172,6 +174,7 @@
       this.collide();
       this.updateArrows(dt);
       this.fx.update(dt);
+      this.fx.tick(this, dt);
       this.trample(dt);
       this.checkMoraleBreak();
       this.checkEnd();
@@ -211,7 +214,10 @@
       if (sp > 12 && (d.charge || u.type === 'giant')) {
         // footfalls: hooves of galloping knights, stomps of giants
         const per = u.type === 'giant' ? 3.77 : Math.PI;
-        if (((u.walk / per) | 0) !== ((w0 / per) | 0)) this.snd(u.type === 'giant' ? 'stomp' : 'hoof', u.x, u.y);
+        if (((u.walk / per) | 0) !== ((w0 / per) | 0)) {
+          this.snd(u.type === 'giant' ? 'stomp' : 'hoof', u.x, u.y);
+          if (u.type === 'giant') this.fx.stomp(u.x, u.y);
+        }
       }
       const turn = u.type === 'giant' ? 3 : u.type === 'knight' ? 5 : 9;
       u.facing = U.turnTo(u.facing, u.faceTo, turn * dt);
@@ -295,6 +301,7 @@
           k.vx *= 0.2; k.vy *= 0.2;
           this.hit(k, v, ch.dmg * 0.4, 'charge', nx, ny, 60);
           this.fx.sparks(v.x, v.y, 4, 5);
+          this.fx.splinters((v.x + k.x) / 2, (v.y + k.y) / 2, 4, 7);
           return;
         }
       }
@@ -303,6 +310,7 @@
       this.hit(k, v, ch.dmg * power, 'charge', kx * 0.7 + nx * 0.3, ky * 0.7 + ny * 0.3, ch.knock * power);
       k.vx *= 0.82; k.vy *= 0.82;
       this.fx.dust(v.x, v.y, 3, 3);
+      if (power > 0.8) this.fx.shock(v.x, v.y, 16, false);
       this.fx.shake(0.5);
     }
 
@@ -329,6 +337,8 @@
         }
         const ix = u.x + Math.cos(u.facing) * (u.r + 14), iy = u.y + Math.sin(u.facing) * (u.r + 14);
         this.fx.dust(ix, iy, 6, 5);
+        this.fx.shock(ix, iy, 30, true);
+        this.fx.crack(ix, iy);
         this.fx.shake(hits ? 1.2 + hits * 0.4 : 0.5);
         this.snd('giant', ix, iy);
         return;
@@ -415,11 +425,11 @@
       if (v.type === 'giant') {
         this.fx.shake(5);
         this.fx.dust(v.x, v.y, 14, 8);
-        this.event(`${TM.TEAMS[v.team].name}: великан повержен!`, v.team);
+        this.event(`${TM.TEAMS[v.team].name}: великан повержен!`, v.team, v.x, v.y, 'giant', 'giant');
       }
       if (!this.firstBlood) {
         this.firstBlood = true;
-        this.event(`Первая кровь — ${a ? TM.TEAMS[a.team].name.toLowerCase() : 'земля'}`, a ? a.team : v.team);
+        this.event(`Первая кровь — ${a ? TM.TEAMS[a.team].name.toLowerCase() : 'земля'}`, a ? a.team : v.team, v.x, v.y, 'blood', a ? a.type : v.type);
       }
       if (a && a.team === v.team) {
         this.stats[a.team].teamkills++;
@@ -429,7 +439,7 @@
         this.stats[a.team].byType[a.type].kills++;
         const k = a.kills;
         if (k === 10 || k === 20 || k === 35 || k === 50 || k === 75 || k === 100 || (k === 5 && a.type !== 'giant')) {
-          this.event(`${a.def.name} (${TM.TEAMS[a.team].name.toLowerCase()}) — ${k} убийств!`, a.team);
+          this.event(`${a.def.name} (${TM.TEAMS[a.team].name.toLowerCase()}) — ${k} убийств!`, a.team, a.x, a.y, 'hero', a.type);
           this.fx.text(a.x, a.y - a.r - 4, k + ' убийств!', '#fff', 9);
         }
       }
@@ -464,11 +474,13 @@
         const s = this.stats[t];
         if (!this.broken[t] && s.alive > 8 && s.fleeing / s.alive > 0.4) {
           this.broken[t] = true;
-          this.event(`${TM.TEAMS[t].name} дрогнули и бегут!`, t);
+          const c = this.center && this.center[t];
+          this.event(`${TM.TEAMS[t].name} дрогнули и бегут!`, t, c && c.x, c && c.y, 'break');
           if (this.center) this.snd('rout', this.center[t].x, this.center[t].y);
         } else if (this.broken[t] && s.fleeing / Math.max(1, s.alive) < 0.12) {
           this.broken[t] = false;
-          if (s.alive > 8) this.event(`${TM.TEAMS[t].name} снова в строю`, t);
+          const c = this.center && this.center[t];
+          if (s.alive > 8) this.event(`${TM.TEAMS[t].name} снова в строю`, t, c && c.x, c && c.y, 'rally');
         }
       }
     }
@@ -558,9 +570,10 @@
       if (!this.endTime && (a0 === 0 || a1 === 0 || routed >= 0)) {
         this.endTime = this.time;
         this.winner = routed >= 0 ? 1 - routed : a0 > 0 ? 0 : a1 > 0 ? 1 : 2; // 2 = mutual annihilation
-        if (routed >= 0) this.event(`${TM.TEAMS[routed].full} обращена в бегство`, routed);
+        const c = this.center;
+        if (routed >= 0) this.event(`${TM.TEAMS[routed].full} обращена в бегство`, routed, c && c[routed].x, c && c[routed].y, 'break');
         if (this.winner < 2) {
-          this.event(`${TM.TEAMS[this.winner].full} побеждает!`, this.winner);
+          this.event(`${TM.TEAMS[this.winner].full} побеждает!`, this.winner, c && c[this.winner].x, c && c[this.winner].y, 'win');
           if (this.center) this.snd('cheer', this.center[this.winner].x, this.center[this.winner].y);
         }
         else this.event('Взаимное уничтожение!', 0);
